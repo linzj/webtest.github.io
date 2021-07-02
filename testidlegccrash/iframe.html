@@ -1,0 +1,18 @@
+<head>
+<meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+</script>
+</head>
+<body>
+<button id="click">clickme here</button>
+<script>
+(function() {
+  let mybutton = window.click;
+  mybutton.addEventListener('click', (e) => {
+    parent.myframe.parentNode.removeChild(parent.myframe);
+    console.log('calling requestIdleCallback');
+    requestIdleCallback(() => console.log('idle callback'));
+  });
+})()
+</script>
+</body>
+
