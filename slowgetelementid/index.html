@@ -1,0 +1,33 @@
+<html>
+<head><title>Performance cliff with String convertion from V8 to Blink</title></head>
+<body>
+<div>document.getElementById("foo"): <span id="result_slow">Running ...</span></div>
+<div>document.getElementById("fooba"): <span id="result_fast">Running ...</span></div>
+<script>
+function run_slow() {
+  for (var i = 0; i < 3000000; i++) {
+    document.getElementById("foo");  // with str.length in region [1, 4]
+  }
+}
+
+function run_fast() {
+  for (var i = 0; i < 3000000; i++) {
+    document.getElementById("fooba");  // str.length >= 5
+  }
+}
+
+var now = window.performance && window.performance.now ? function () { return window.performance.now(); } : Date.now;
+
+setTimeout(function() {
+  let t1 = now();
+  run_slow();
+  let t2 = now();
+  run_fast();
+  let t3 = now();
+
+  result_slow.innerHTML = (t2 - t1).toFixed(2) + " ms";
+  result_fast.innerHTML = (t3 - t2).toFixed(2) + " ms";
+}, 100);
+</script>
+</body>
+</html>
