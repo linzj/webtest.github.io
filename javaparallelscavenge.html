@@ -1,0 +1,257 @@
+<html>
+<head>
+<title>
+Java Parallel Scavenge GC OldGen算法解析
+</title>
+<style>
+.graph_desc {
+  text-align:center;
+}
+.arrow-down {
+  width:0;
+  height:0;
+  border-left: 10px solid transparent;
+  border-right: 10px solid transparent;
+  border-top: 10px solid green;
+  position: relative;
+}
+.arrow-up {
+  width:0;
+  height:0;
+  border-left: 10px solid transparent;
+  border-right: 10px solid transparent;
+  border-bottom: 10px solid green;
+  position: absolute;
+}
+.movable {
+    position: relative;
+}
+div.line {
+    border: solid ;
+    border-color: green;
+    width: 100%;
+    height: 250px;
+    border-radius: 50%;
+    border-left: none;
+    border-top: none;
+    border-right: none;
+    position: absolute;
+}
+.canvas {
+    background-color: transparent;
+    display: block;
+    z-index: -1;
+}
+p {
+    text-indent:2em;
+}
+h1 {
+    text-align: center;
+}
+.graph {
+    width: 1800px;
+}
+</style>
+</head>
+<body>
+<h1 class="title">
+Java Parallel Scavenge GC OldGen算法解析
+</h1>
+<p>
+Parallel Scavenge是Java默认使用的堆。本文重点讨论它的Old Generation堆。
+</p>
+<p>
+相对的v8的Old Generation堆，它使用了平整连续的layout，而不是v8的分页的，不连续的layout。另外它支持多线程无锁分配，而v8没有这个feature。它没有sweep操作，也不需要free list记录可以分配的区域以及根据可以分配的区域的size做分类。它做完compact操作得到的并非完美的无碎片状态，而只是低碎片状态。 
+</p>
+<p>
+由于多线程无锁的特性，堆要求top指针指向的是一大片连续的，可以分配的区域。以使得atomic compare and swap原子算法可以无锁的运作。Sweep操作只能标记可以重新分配的区域，对上面要求毫无帮助。因此GC算法依赖compact操作能产生大片连续可以分配的区域。PS GC算法只有mark，没有sweep，直接进入compact，而且必须compact。
+</p>
+<p>
+通过mark，可以知道存活对象的分布。
+</p>
+<p>
+但是真正的考验是如何快速的compact。v8的compact算法只作用于它的1MB为单位的分页，是缓慢然而正确的重新分配，重新定位的算法。具体的做法是把需要compact的页排除到可以分配的空间之外，重新在old space空间分配空间给这些页的存活对象。不够则重新分配页给old space。完成复制和引用更新后释放被compact的页；对于没有采用分页的PS堆，需要重新分配一个一模一样的Old Generation堆就产生512MB以上的内存峰值，更有可能直接耗尽操作系统允许的虚拟地址空间。因此PS Old Generation堆使用了一种低碎片的算法。
+</p>
+<p>
+PS Old Generation堆把自己连续的内存空间划分为64k个字（64位8字节，32位4字节）为单位的region。compact操作只是把里面还有存活对象的region，集中到堆的base位置。并不理会region里面的碎片情况。
+</p>
+<p>
+并不需要做特别多的bookkeeping就可以管理这些region，只需要简单的加减法和逻辑位移即可。比如想知道一个地址a所在的region的index，只需(a - region_base) >> 16即可。通过region的index，可以从线性的结构（通常是数组）快速查找有关的数据。
+</p>
+<p>
+由于compact是对象移动的过程。移动的过程需要两步，复制内容和更新内容里面的引用。复制内容可以使用CPU的SIMD指令获得很高的性能，那么更新内容的指针如何获得高性能呢？V8的更新引用需要单线程的扫描全部存活的对象，在发现引用的位置被标记为forwardee的时候，更新引用。使用连续空间的Old Generation有了更好的选择：只需要扫描移动过的region即可（Young Generation也需要扫描）。当发现引用属于Old Generation堆（即比较是否大于等于Old Generation堆的基地址，以及小于其结束地址），首先可以断定这个引用必须修正，而不像v8那样的标记。然后可以计算出该引用原来属于的region index。从这个index获得一个compact的bookkeeping条目，条目可以找到这个region被移动到哪里去了。新的引用只需要从新的region的基地址加上引用的region offset即可。如下面的语句表示：
+</p>
+<pre>
+region_index = (old_reference - region_base) >> 16;
+region_offset = old_reference & ~((1 << 16) - 1);
+new_reference = bookkeeping_enties[region_index].destination() + region_offset;
+</pre>
+<p>
+更妙的是上面算哦的每件事都可以多线程的运行。mark可以多线程的从strong root们多线程的开始mark，v8不能这么做，因为它的marking的bitmap也是零散的分布在各个1MB的页。compact的移动可以多线程的运行，因为region之间拷贝数据没有相互的依赖。v8不能这么做，因为它需要free list维护可以分配的区域，并以size分类，这个树结构不得不加锁保护，但EcmaScript单线程的特性意味着加锁会损害大部分情况下脚本分配对象的性能。compact的引用更新可以多线程的运行，因为region为单位的数据更新没有数据依赖（见上面的语句）。Young Generation由于相同的理由也可以多线程的运行引用更新。v8最多只能按照不同space的分类多线程的运行，虽然现在没有这么做。这是因为v8没有比space更加小的划分，没有像PS Old Generation这种64k个字的划分。这也是因为v8堆不连续产生的限制。在分页结构使用这么小的划分，会产生结构化的bookkeeping数据，而不是PS Old Generation的线性的bookkeeping数据。
+</p>
+<p>
+下面的图案表示的Old Generation堆都有24个region, 红色表示其为空, 蓝色表示存活的对象。比较完整的展示GC各个阶段的Java堆情况。
+</p>
+<div class="movable">top</div>
+<div class="arrow-down" style="left:-10px;"></div>
+<div id="java_heap_layout" class="graph">
+</div>
+<div class="graph_desc">
+空的PS堆
+</div>
+
+<div class="movable" style="left:1600px;">top</div>
+<div class="arrow-down" style="left:1600px;"></div>
+<div id="java_heap_used_layout" class="graph">
+</div>
+<div class="graph_desc">
+用了一段时间的PS堆
+</div>
+
+
+<div class="movable" style="left:1600px;">top</div>
+<div class="arrow-down" style="left:1600px;"></div>
+<div id="java_heap_used_layout_with_target" class="graph">
+</div>
+<div class="graph_desc">
+region有了移动目标
+</div>
+
+<div class="movable" style="left:340px;">top</div>
+<div class="arrow-down" style="left:340px;"></div>
+<div id="java_heap_gced" class="graph">
+</div>
+<div class="graph_desc">
+GC后的PS堆
+</div>
+
+<!-- templates -->
+<template id="node_template">
+<div style="width:64px;height:64px;display:inline-block;border-style:solid;background-color: red; border-color: black;overflow: hidden;">
+</div>
+</template>
+
+<template id="subnodeTemplate">
+<div style="width:4px;height:64px;display:inline-block;background-color:red;">
+</div>
+</template>
+
+<!-- scripts -->
+<script>
+(function() {
+    var mydocument = document;
+    var template = mydocument.getElementById("node_template");
+    var subnodeTemplate = mydocument.getElementById("subnodeTemplate");
+
+    function build_basic(target, count) {
+        for (var i = 0; i < count; ++i) {
+            var block = mydocument.importNode(template.content, true).firstElementChild;
+            target.appendChild(block);
+        }
+        return target;
+    }
+    function markUsed(target, usedData) {
+        for (var key in usedData) {
+            var values = usedData[key];
+            if (target.childNodes.length <= key)
+                throw new Error("index overflow");
+            var node = target.children[key];
+            if (node.childNodes.firstElementChild != null)
+                throw new Error("target have children");
+            for (var i = 0; i < 16; ++i) {
+                var child = mydocument.importNode(subnodeTemplate.content, true);
+                node.appendChild(child.firstElementChild);
+            }
+            for (var index in values) {
+                var colorIndex = values[index];
+                var colorTarget = node.children[colorIndex];
+                colorTarget.style.backgroundColor = "blue";
+            }
+        }
+    }
+    function createLine(target, x1, x2, color) {
+        if (false) {
+            div.className = 'line';
+            var style = div.style;
+            style.width = (x2 - x1) * 72;
+            style.left = (x1) * 72;
+            style.top = "250px";
+            style.zIndex = -1;
+            style.display = 'inline-block';
+            target.appendChild(div);
+            var arrow = mydocument.createElement('div');
+            arrow.className = 'arrow-up';
+            var arrowStyle = arrow.style;
+            arrowStyle.left = x1 * 72;
+            // arrowStyle.top = "-250px";
+            arrowStyle.display = 'inline-block';
+
+            target.appendChild(arrow);
+            if (typeof color == "string") {
+                style.borderColor = color;
+                arrowStyle.borderBottomColor = color;
+            }
+        }
+        var context = target.getContext('2d');
+        var ctx = context;
+        var width = (x2 - x1) * 72;
+        var left = (x1) * 72;
+        context.beginPath();
+        context.moveTo(left, 0);
+        context.bezierCurveTo(width / 4 + left, 250 / 2, width / 2 + left, 250, width + left, 0);
+        context.lineWidth = 2;
+        if (typeof color == 'string') {
+            context.strokeStyle = color;
+            context.fillStyle = color;
+        } else {
+            context.strokeStyle = 'green';
+            context.fillStyle = 'green';
+        }
+        context.stroke();
+        context.beginPath();
+        // draw a arrow
+        context.moveTo(left, 0);
+        context.lineTo(left - 5, 10);
+        context.lineTo(left + 5, 10);
+        
+        context.fill();
+        return canvas;
+    }
+    function createCanvas(parent) {
+    }
+    build_basic(mydocument.getElementById("java_heap_layout"), 24);
+    var used = build_basic(mydocument.getElementById("java_heap_used_layout"), 24);
+    var usedData = {
+        1: [2, 3, 7],
+        3: [0, 1, 2, 12],
+        7: [3, 8, 9, 13, 14],
+        9: [0, 4],
+        10: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 15],
+    };
+    markUsed(used, usedData);
+    var used2 = build_basic(mydocument.getElementById("java_heap_used_layout_with_target"), 24);
+    markUsed(used2, usedData);
+    var canvas= mydocument.createElement('canvas');
+    canvas.className = 'canvas';
+    canvas.width = window.innerWidth;
+    used2.appendChild(canvas);
+    createLine(canvas, 0, 1);
+    createLine(canvas, 1, 3, "#444548");
+    createLine(canvas, 2, 7, "yellow");
+    createLine(canvas, 3, 9, "blue");
+    createLine(canvas, 4, 10, "purple");
+    {
+    var used = build_basic(mydocument.getElementById("java_heap_gced"), 24);
+    var usedData = {
+        0: [2, 3, 7],
+        1: [0, 1, 2, 12],
+        2: [3, 8, 9, 13, 14],
+        3: [0, 4],
+        4: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 15],
+    };
+    markUsed(used, usedData);
+    }
+})()
+</script>
+</body>
+</html>
