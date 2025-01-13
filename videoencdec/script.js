@@ -1,10 +1,17 @@
 const kEncodeQueueSize = 33;
 const kEnableVerboseLogging = false;
+const kEnablePerformanceLogging = true;
 
 function verboseLog() {
   // unpack arguments to suite into console.log.
   if (kEnableVerboseLogging) {
     console.log.apply(console, arguments);
+  }
+}
+
+function performanceLog(message) {
+  if (kEnablePerformanceLogging) {
+    alert(message);
   }
 }
 
@@ -285,6 +292,7 @@ class VideoProcessor {
     this.timestampStartInput = document.getElementById("timestampStart");
     this.userStartTime = null;
     this.outputTaskPromises = [];
+    this.startProcessVideoTime = undefined;
   }
 
   setStatus(phase, message) {
@@ -324,7 +332,16 @@ class VideoProcessor {
     }
     if (!this.isFinalized) {
       this.isFinalized = true;
-      this.encoder.finalize();
+      await this.encoder.finalize();
+      const endProcessVideoTime = performance.now();
+      performanceLog(
+        `Total processing time: ${
+          endProcessVideoTime - this.startProcessVideoTime
+        } ms, FPS: ${
+          this.frame_count /
+          ((endProcessVideoTime - this.startProcessVideoTime) / 1000)
+        }`
+      );
     }
   }
 
@@ -375,6 +392,7 @@ class VideoProcessor {
 
   async processVideo(uri) {
     let sawChunks = 0;
+    this.startProcessVideoTime = performance.now();
     const demuxer = new MP4Demuxer(uri, {
       onConfig: (config) => this.setupDecoder(config),
       onChunk: (chunk) => {
