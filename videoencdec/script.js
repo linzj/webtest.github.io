@@ -714,7 +714,7 @@ class MP4Demuxer {
       }
 
       // Find the nearest keyframe at or before the desired start time
-      startIndex = left;
+      startIndex = Math.min(left, samples.length - 1);
       while (startIndex > 0 && !samples[startIndex].is_sync) {
         startIndex--;
       }
