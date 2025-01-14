@@ -1,4 +1,7 @@
+import { ChunkDispatcher } from "./chunkDispatcher.js";
+
 const kEncodeQueueSize = 33;
+const kDecodeQueueSize = kEncodeQueueSize;
 const kEnableVerboseLogging = false;
 const kEnablePerformanceLogging = true;
 
@@ -281,7 +284,7 @@ class VideoProcessor {
     this.frameCountDisplay = document.getElementById("frameCount");
     this.nb_samples = 0;
     this.frame_count = 0;
-    this.isFinalized = false;
+    this.state = "idle";
     this.previousPromise = null;
     this.matrix = null; // replace this.rotation with this.matrix
     this.startTime = 0;
@@ -293,6 +296,7 @@ class VideoProcessor {
     this.userStartTime = null;
     this.outputTaskPromises = [];
     this.startProcessVideoTime = undefined;
+    this.chuckDispatcher = new ChunkDispatcher();
   }
 
   setStatus(phase, message) {
@@ -330,8 +334,8 @@ class VideoProcessor {
       await Promise.all(this.outputTaskPromises);
       this.outputTaskPromises = [];
     }
-    if (!this.isFinalized) {
-      this.isFinalized = true;
+    if (this.state !== "finalized") {
+      this.state = "finalized";
       await this.encoder.finalize();
       const endProcessVideoTime = performance.now();
       performanceLog(
@@ -390,6 +394,39 @@ class VideoProcessor {
     }
   }
 
+  dispatch(n) {
+    if (this.state !== "processing") {
+      return;
+    }
+    verboseLog(`Dispatching ${n} chunks`);
+    this.chuckDispatcher.requestChunks(
+      n,
+      (chunk) => {
+        this.decoder.decode(chunk);
+      },
+      async () => {
+        this.state = "exhausted";
+        await this.decoder.flush();
+        if (this.decoder.decodeQueueSize == 0) {
+          this.finalize();
+        }
+      }
+    );
+  }
+
+  timerDispatch() {
+    if (this.state !== "processing") {
+      return;
+    }
+    setTimeout(() => {
+      const n = kDecodeQueueSize - this.decoder.decodeQueueSize; // Number of chunks to request
+      if (n > 0) {
+        this.dispatch(n);
+      }
+      this.timerDispatch(); // Call the timerDispatch function again after 0ms  (next tick) to keep the process running
+    }, 1000);
+  }
+
   async processVideo(uri) {
     let sawChunks = 0;
     this.startProcessVideoTime = performance.now();
@@ -397,13 +434,15 @@ class VideoProcessor {
       onConfig: (config) => this.setupDecoder(config),
       onChunk: (chunk) => {
         sawChunks++;
-        this.decoder.decode(chunk);
+        this.chuckDispatcher.addChunk(chunk);
+        if (this.state === "idle") {
+          this.state = "processing";
+        }
       },
       setStatus: (phase, message) => this.setStatus(phase, message),
       onChunkEnd: (sampleProcessed) => {
         this.nb_samples = sampleProcessed;
         verboseLog(`Saw ${sawChunks} chunks`);
-        this.decoder.flush();
       },
       timeRangeStart: this.timeRangeStart,
       timeRangeEnd: this.timeRangeEnd,
@@ -417,11 +456,20 @@ class VideoProcessor {
       error: (e) => console.error(e),
     });
 
-    this.decoder.ondequeue = () => {
-      if (this.decoder.decodeQueueSize == 0) {
-        this.finalize();
-      }
-    };
+    let isChromeBased = false;
+    // If browser is chrome based.
+    if (navigator.userAgent.toLowerCase().includes("chrome")) {
+      this.decoder.ondequeue = () => {
+        if (this.state !== "processing") {
+          return;
+        }
+        const n = kDecodeQueueSize - this.decoder.decodeQueueSize; // Number of chunks to request
+        if (n > 0) {
+          this.dispatch(n);
+        }
+      };
+      isChromeBased = true;
+    }
 
     await this.decoder.configure(config);
     this.setStatus("decode", "Decoder configured");
@@ -446,6 +494,11 @@ class VideoProcessor {
     this.frameCountDisplay.textContent = `Processed frames: 0 / ${this.nb_samples}`;
     this.setMatrix(config.matrix);
     this.startTime = this.userStartTime || config.startTime || new Date();
+    // Kick off the processing.
+    this.dispatch(kDecodeQueueSize);
+    if (!isChromeBased) {
+      this.timerDispatch();
+    }
   }
 
   async processFrame(frame) {
