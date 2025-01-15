@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>拖放图片显示并保存截图</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f0f0f0;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .drop-zone {
+            width: 100%;
+            max-width: 600px;
+            height: 200px;
+            border: 2px dashed #ccc;
+            border-radius: 10px;
+            margin: 20px auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #aaa;
+            transition: background-color 0.3s, border-color 0.3s;
+            background-color: #fff;
+        }
+
+        .drop-zone.dragover {
+            background-color: #e0e0e0;
+            border-color: #333;
+            color: #333;
+        }
+
+        .gallery {
+            width: 100%;
+            max-width: 800px;
+            margin: 20px auto;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            overflow-y: auto;
+            max-height: 80vh;
+            /* 限制画廊的最大高度，避免页面过长 */
+            padding: 10px;
+            background-color: #fff;
+            border-radius: 10px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+
+        .gallery img {
+            display: block;
+            max-width: none;
+            /* 保持图片原始宽度 */
+            height: auto;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+
+        .controls {
+            width: 100%;
+            max-width: 800px;
+            margin: 20px auto;
+            text-align: center;
+        }
+
+        .controls button {
+            padding: 10px 20px;
+            font-size: 16px;
+            border: none;
+            border-radius: 5px;
+            background-color: #4CAF50;
+            color: white;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        .controls button:hover {
+            background-color: #45a049;
+        }
+
+        .quality-control {
+            width: 100%;
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 10px;
+            background-color: #fff;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+
+        .quality-control label {
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        .quality-control input {
+            width: 100%;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="drop-zone" id="drop-zone">
+        拖放图片到这里，或点击选择图片
+    </div>
+
+    <!-- Add hidden file input -->
+    <input type="file" id="file-input" multiple accept="image/*" style="display: none;">
+
+    <div class="controls">
+        <button id="save-btn">生成并保存截图</button>
+    </div>
+
+    <div class="quality-control">
+        <label for="quality">输出图片质量 (1-100): <span id="quality-value">80</span></label>
+        <input type="range" id="quality" min="1" max="100" value="80">
+    </div>
+
+    <div class="gallery" id="gallery">
+        <!-- 拖入的图片将按照顺序垂直显示在这里 -->
+    </div>
+
+    <!-- 引入 html2canvas 库 -->
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+
+    <script>
+        const dropZone = document.getElementById('drop-zone');
+        const gallery = document.getElementById('gallery');
+        const saveBtn = document.getElementById('save-btn');
+        const fileInput = document.getElementById('file-input');
+        const qualitySlider = document.getElementById('quality');
+        const qualityValue = document.getElementById('quality-value');
+
+        // Add click handler to drop-zone
+        dropZone.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        // Handle file selection
+        fileInput.addEventListener('change', (e) => {
+            handleFiles(e.target.files);
+            // Reset file input
+            fileInput.value = '';
+        });
+
+        // 阻止默认的拖放行为
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+            document.body.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        // 添加拖动样式
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => {
+                dropZone.classList.add('dragover');
+            }, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => {
+                dropZone.classList.remove('dragover');
+            }, false);
+        });
+
+        // 处理文件的拖放
+        dropZone.addEventListener('drop', handleDrop, false);
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+
+            handleFiles(files);
+        }
+
+        function handleFiles(files) {
+            [...files].forEach(previewFile);
+        }
+
+        // Add quality slider value display
+        qualitySlider.addEventListener('input', () => {
+            qualityValue.textContent = qualitySlider.value;
+        });
+
+        // Modify the previewFile function to compress images before display
+        function previewFile(file) {
+            if (!file.type.startsWith('image/')) return;
+
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onloadend = function () {
+                const img = new Image();
+                img.src = reader.result;
+                img.onload = function () {
+                    // Create canvas for compression
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+
+                    // Calculate new dimensions (max width 1200px)
+                    let width = img.width;
+                    let height = img.height;
+                    if (width > 1200) {
+                        height = Math.round(height * 1200 / width);
+                        width = 1200;
+                    }
+
+                    canvas.width = width;
+                    canvas.height = height;
+
+                    // Draw and compress
+                    ctx.drawImage(img, 0, 0, width, height);
+
+                    // Create compressed image element
+                    const compressedImg = document.createElement('img');
+                    compressedImg.src = canvas.toDataURL('image/jpeg', 0.8);
+                    compressedImg.alt = file.name;
+                    gallery.appendChild(compressedImg);
+                };
+            }
+        }
+
+        // 生成并保存截图
+        saveBtn.addEventListener('click', () => {
+            // 由于画廊可能超出可视区域，创建一个临时容器
+            const tempGallery = document.createElement('div');
+            tempGallery.style.padding = '10px';
+            tempGallery.style.backgroundColor = '#fff';
+            tempGallery.style.borderRadius = '10px';
+            tempGallery.style.boxShadow = '0 2px 5px rgba(0,0,0,0.1)';
+            tempGallery.style.display = 'flex';
+            tempGallery.style.flexDirection = 'column';
+            tempGallery.style.gap = '10px';
+
+            // 克隆所有图片到临时容器
+            gallery.querySelectorAll('img').forEach(img => {
+                const clonedImg = img.cloneNode(true);
+                tempGallery.appendChild(clonedImg);
+            });
+
+            // 将临时容器添加到文档中（隐藏）
+            tempGallery.style.position = 'absolute';
+            tempGallery.style.top = '-9999px';
+            document.body.appendChild(tempGallery);
+
+            // 使用 html2canvas 生成截图
+            html2canvas(tempGallery, {
+                useCORS: true,
+                scale: 1, // Reduce scale to 1 (default is window.devicePixelRatio)
+                logging: false, // Disable logging
+                backgroundColor: '#ffffff'
+            }).then(canvas => {
+                // 移除临时容器
+                document.body.removeChild(tempGallery);
+
+                // Use the quality value from the slider
+                const quality = parseInt(qualitySlider.value) / 100;
+
+                // Convert to blob with quality control
+                canvas.toBlob(function (blob) {
+                    const link = document.createElement('a');
+                    link.href = URL.createObjectURL(blob);
+                    link.download = 'gallery_screenshot.png';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                }, 'image/png', quality);
+            }).catch(err => {
+                console.error('截图生成失败:', err);
+                alert('生成截图时发生错误。请确保所有图片都已加载并且没有跨域问题。');
+            });
+        });
+    </script>
+
+</body>
+
+</html>
