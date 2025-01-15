@@ -19,17 +19,11 @@ function performanceLog(message) {
 }
 
 class VideoEncoder {
-  constructor(canvas, mp4File) {
-    this.canvas = canvas;
-    this.mp4File = mp4File;
+  constructor() {
     this.encoder = null;
-    this.trackId = null;
-    this.firstKeyFrame = true;
-    this.spsData = null;
-    this.ppsData = null;
     this.blockingPromise = null;
     this.blockingPromiseResolve = null;
-    this.timescale = 10000;
+    this.muxer = null;
   }
 
   async init(width, height, fps) {
@@ -57,84 +51,22 @@ class VideoEncoder {
       50_000_000 // Cap at 50Mbps for Level 5.1
     );
 
-    const config = {
-      codec: "avc1.640033", // Level 5.1 supports up to 4096x2304
-      width: targetWidth,
-      height: targetHeight,
-      // bitrate: targetBitrate,
-      framerate: fps,
-      avc: { format: "annexb" },
-    };
-
-    // Initialize MP4Box with explicit file type
-    this.trackId = this.mp4File.addTrack({
-      type: "avc1",
-      codecs: "avc1.640033",
-      width: targetWidth,
-      height: targetHeight,
-      timescale: this.timescale,
-      framerate: {
-        fixed: true,
-        fps: fps,
+    this.muxer = new Mp4Muxer.Muxer({
+      target: new Mp4Muxer.ArrayBufferTarget(),
+      video: {
+        codec: "avc",
+        width: targetWidth,
+        height: targetHeight,
       },
+      fastStart: "in-memory",
+      firstTimestampBehavior: "offset",
     });
-
-    verboseLog("Track ID returned:", this.trackId);
-
-    if (!this.trackId || this.trackId < 0) {
-      throw new Error(`Invalid track ID returned: ${this.trackId}`);
-    }
 
     this.encoder = new window.VideoEncoder({
-      output: async (chunk, cfg) => {
-        try {
-          const buffer = new ArrayBuffer(chunk.byteLength);
-          const initialView = new Uint8Array(buffer);
-          chunk.copyTo(initialView);
-
-          let frameData = initialView;
-
-          if (chunk.type === "key") {
-            const nalUnits = this.parseNALUnits(initialView);
-            for (const nal of nalUnits) {
-              const nalType = nal[0] & 0x1f;
-              if (nalType === 7 && !this.spsData) {
-                this.spsData = nal;
-                verboseLog("Found SPS:", this.spsData);
-              } else if (nalType === 8 && !this.ppsData) {
-                this.ppsData = nal;
-                verboseLog("Found PPS:", this.ppsData);
-              }
-            }
-
-            if (this.spsData && this.ppsData && this.firstKeyFrame) {
-              this.firstKeyFrame = false;
-              const avcC = this.createAVCCBox();
-              this.setAvccBox(this.trackId, avcC);
-            }
-
-            if (this.spsData && this.ppsData) {
-              frameData = this.createFullFrame(initialView);
-            }
-          }
-
-          const sample = {
-            data: frameData,
-            duration: Math.round((chunk.duration * this.timescale) / 1000000),
-            dts: Math.round((chunk.timestamp * this.timescale) / 1000000),
-            cts: Math.round((chunk.timestamp * this.timescale) / 1000000),
-            is_sync: chunk.type === "key",
-          };
-
-          this.mp4File.addSample(this.trackId, sample.data, sample);
-          verboseLog("Added sample:", sample);
-          verboseLog("From chunk:", chunk);
-        } catch (error) {
-          console.error("Error processing video chunk:", error);
-        }
-      },
+      output: (chunk, meta) => this.muxer.addVideoChunk(chunk, meta),
       error: (e) => console.error("Encoding error:", e),
     });
+
     this.encoder.ondequeue = () => {
       if (
         this.blockingPromise &&
@@ -146,106 +78,15 @@ class VideoEncoder {
       }
     };
 
-    await this.encoder.configure(config);
-  }
-
-  parseNALUnits(data) {
-    const nalUnits = [];
-    let offset = 0;
-
-    while (offset < data.length - 4) {
-      if (
-        data[offset] === 0 &&
-        data[offset + 1] === 0 &&
-        data[offset + 2] === 0 &&
-        data[offset + 3] === 1
-      ) {
-        const start = offset + 4;
-        let end = data.length;
-
-        for (let i = start; i < data.length - 4; i++) {
-          if (
-            data[i] === 0 &&
-            data[i + 1] === 0 &&
-            data[i + 2] === 0 &&
-            data[i + 3] === 1
-          ) {
-            end = i;
-            break;
-          }
-        }
-
-        nalUnits.push(data.slice(start, end));
-        offset = end;
-      } else {
-        offset++;
-      }
-    }
-
-    return nalUnits;
-  }
-
-  createAVCCBox() {
-    return {
-      configurationVersion: 1,
-      AVCProfileIndication: this.spsData[1],
-      profile_compatibility: this.spsData[2],
-      AVCLevelIndication: this.spsData[3],
-      lengthSizeMinusOne: 3,
-      nb_SPS: 1,
-      SPS: [this.spsData],
-      nb_PPS: 1,
-      PPS: [this.ppsData],
+    const config = {
+      codec: "avc1.640033",
+      width: targetWidth,
+      height: targetHeight,
+      // bitrate: targetBitrate,
+      framerate: fps,
     };
-  }
 
-  createFullFrame(initialView) {
-    const fullFrame = new Uint8Array(
-      4 + this.spsData.length + 4 + this.ppsData.length + initialView.length
-    );
-
-    let offset = 0;
-    // Add SPS
-    fullFrame.set([0, 0, 0, 1], offset);
-    offset += 4;
-    fullFrame.set(this.spsData, offset);
-    offset += this.spsData.length;
-
-    // Add PPS
-    fullFrame.set([0, 0, 0, 1], offset);
-    offset += 4;
-    fullFrame.set(this.ppsData, offset);
-    offset += this.ppsData.length;
-
-    // Add frame data
-    fullFrame.set(initialView, offset);
-
-    return fullFrame;
-  }
-
-  setAvccBox(trackId, avcC) {
-    const track = this.mp4File.getTrackById(trackId);
-    if (
-      track &&
-      track.trak &&
-      track.trak.mdia &&
-      track.trak.mdia.minf &&
-      track.trak.mdia.minf.stbl &&
-      track.trak.mdia.minf.stbl.stsd
-    ) {
-      const stsd = track.trak.mdia.minf.stbl.stsd;
-      if (!stsd.entries) stsd.entries = [];
-      if (!stsd.entries[0]) {
-        stsd.entries[0] = {
-          type: "avc1",
-          width: track.width,
-          height: track.height,
-          avcC: avcC,
-        };
-      } else {
-        stsd.entries[0].avcC = avcC;
-      }
-    }
+    await this.encoder.configure(config);
   }
 
   async encode(frame) {
@@ -269,7 +110,17 @@ class VideoEncoder {
   async finalize() {
     await this.encoder.flush();
     this.encoder.close();
-    this.mp4File.save("processed-video.mp4");
+    this.muxer.finalize();
+
+    // Save the file
+    const { buffer } = this.muxer.target;
+    const blob = new Blob([buffer], { type: "video/mp4" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "processed-video.mp4";
+    a.click();
+    URL.revokeObjectURL(url);
   }
 }
 
@@ -441,7 +292,7 @@ class VideoProcessor {
       },
       setStatus: (phase, message) => this.setStatus(phase, message),
       onChunkEnd: (sampleProcessed) => {
-        this.nb_samples = sampleProcessed;
+        this.nb_samples = sawChunks;
         verboseLog(`Saw ${sawChunks} chunks`);
       },
       timeRangeStart: this.timeRangeStart,
@@ -487,9 +338,8 @@ class VideoProcessor {
     }
     this.canvas.width = canvasWidth;
     this.canvas.height = canvasHeight;
-    this.mp4File = MP4Box.createFile({ ftyp: "isom" });
-    this.encoder = new VideoEncoder(this.canvas, this.mp4File);
-    this.encoder.init(canvasWidth, canvasHeight, config.fps);
+    this.encoder = new VideoEncoder();
+    await this.encoder.init(canvasWidth, canvasHeight, config.fps);
     this.frame_count = 0;
     this.frameCountDisplay.textContent = `Processed frames: 0 / ${this.nb_samples}`;
     this.setMatrix(config.matrix);
@@ -713,8 +563,13 @@ class MP4Demuxer {
         }
       }
 
+      startIndex = left;
+      // The start is not in the current 1000 samples.
+      // Just return.
+      if (startIndex == samples.length) {
+        return;
+      }
       // Find the nearest keyframe at or before the desired start time
-      startIndex = Math.min(left, samples.length - 1);
       while (startIndex > 0 && !samples[startIndex].is_sync) {
         startIndex--;
       }
