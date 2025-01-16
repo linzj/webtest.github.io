@@ -210,7 +210,12 @@ export class VideoProcessor {
     this.canvas.width = canvasWidth;
     this.canvas.height = canvasHeight;
     this.encoder = new VideoEncoder();
-    await this.encoder.init(canvasWidth, canvasHeight, config.fps);
+    await this.encoder.init(
+      canvasWidth,
+      canvasHeight,
+      config.fps,
+      !this.isChromeBased
+    );
     this.frame_count = 0;
     this.frameCountDisplay.textContent = `Processed frames: 0 / ${this.nb_samples}`;
     this.setMatrix(config.matrix);

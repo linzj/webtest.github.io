@@ -6,9 +6,10 @@ export class VideoEncoder {
     this.blockingPromise = null;
     this.blockingPromiseResolve = null;
     this.muxer = null;
+    this.chunks = [];
   }
 
-  async init(width, height, fps) {
+  async init(width, height, fps, useCalculatedBitrate) {
     verboseLog("Initializing encoder with dimensions:", { width, height });
 
     // Calculate maximum dimensions for Level 5.1 (4096x2304)
@@ -34,7 +35,13 @@ export class VideoEncoder {
     );
 
     this.muxer = new Mp4Muxer.Muxer({
-      target: new Mp4Muxer.ArrayBufferTarget(),
+      target: new Mp4Muxer.StreamTarget({
+        chunked: true,
+        onData: (data, position) => {
+          this.chunks.push({ data: new Uint8Array(data), position });
+        }
+      }),
+      fastStart: "fragmented",
       video: {
         codec: "avc",
         width: targetWidth,
@@ -64,9 +71,11 @@ export class VideoEncoder {
       codec: "avc1.640033",
       width: targetWidth,
       height: targetHeight,
-      // bitrate: targetBitrate,
       framerate: fps,
     };
+    if (useCalculatedBitrate) {
+      config.bitrate = targetBitrate;
+    }
 
     await this.encoder.configure(config);
   }
@@ -93,10 +102,14 @@ export class VideoEncoder {
     await this.encoder.flush();
     this.encoder.close();
     this.muxer.finalize();
-
-    // Save the file
-    const { buffer } = this.muxer.target;
-    const blob = new Blob([buffer], { type: "video/mp4" });
+    const sortedChunks = this.chunks.sort((a, b) => a.position - b.position);
+    const lastChunk = sortedChunks[sortedChunks.length - 1];
+    const totalSize = lastChunk.position + lastChunk.data.length;
+    const result = new Uint8Array(totalSize);
+    for (const chunk of sortedChunks) {
+      result.set(chunk.data, chunk.position);
+    }
+    const blob = new Blob([result], { type: "video/mp4" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
