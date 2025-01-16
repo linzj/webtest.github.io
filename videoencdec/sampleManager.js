@@ -72,6 +72,14 @@ export class SampleManager {
       endIndex++;
     }
 
+    if (preciousEndIndex >= this.samples.length) {
+      preciousEndIndex = this.samples.length - 1;
+    }
+
+    if (preciousStartIndex >= this.samples.length) {
+      throw new Error("Invalid sample range");
+    }
+
     const outputTimeRangeStart = SampleManager.sampleTimeMs(
       this.samples[preciousStartIndex]
     );
@@ -89,6 +97,16 @@ export class SampleManager {
     let preciousStartIndex = startIndex;
     while (startIndex > 0 && !this.samples[startIndex].is_sync) {
       startIndex--;
+    }
+    if (endIndex >= this.samples.length) {
+      endIndex = this.samples.length - 1;
+    }
+    while (endIndex > 0 && !this.samples[endIndex].cts) {
+      endIndex--;
+    }
+
+    if (startIndex >= endIndex) {
+      throw new Error("Invalid sample range");
     }
 
     const outputTimeRangeStart = SampleManager.sampleTimeMs(
