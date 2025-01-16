@@ -87,6 +87,10 @@ export class VideoProcessor {
     if (this.state !== "initialized") {
       throw new Error("Processor is not initializing");
     }
+    while (this.previousPromise) {
+      await this.waitForPreviousPromise();
+    }
+
     this.state = "processing";
     try {
       this.timerDispatch();
@@ -98,8 +102,6 @@ export class VideoProcessor {
   }
 
   async processFileByTime(startMs, endMs) {
-    this.timeRangeStart = startMs;
-    this.timeRangeEnd = endMs;
     this.startProcessVideoTime = performance.now();
 
     if (!this.timestampProvider.validateTimestampInput()) {
@@ -110,10 +112,8 @@ export class VideoProcessor {
     if (!this.timestampProvider.hasValidStartTime()) {
       return;
     }
-    this.nb_samples = this.sampleManager.finalizeTimeRange(
-      this.timeRangeStart,
-      this.timeRangeEnd
-    );
+    [this.nb_samples, this.timeRangeStart, this.timeRangeEnd] =
+      this.sampleManager.finalizeTimeRange(startMs, endMs);
     await this.processFile();
   }
 
@@ -121,10 +121,8 @@ export class VideoProcessor {
     this.startIndex = startIndex;
     this.endIndex = endIndex;
     this.startProcessVideoTime = performance.now();
-    this.nb_samples = this.sampleManager.finalizeSampleInIndex(
-      this.startIndex,
-      this.endIndex
-    );
+    [this.nb_samples, this.timeRangeStart, this.timeRangeEnd] =
+      this.sampleManager.finalizeSampleInIndex(this.startIndex, this.endIndex);
     await this.processFile();
   }
 
@@ -175,7 +173,7 @@ export class VideoProcessor {
   async setupDecoder(config) {
     // Initialize the decoder
     this.decoder = new VideoDecoder({
-      output: (frame) => this.outputTaskPromises.push(this.processFrame(frame)),
+      output: (frame) => this.handleDecoderOutput(frame),
       error: (e) => console.error(e),
     });
 
@@ -195,6 +193,7 @@ export class VideoProcessor {
 
     await this.decoder.configure(config);
     this.setStatus("decode", "Decoder configured");
+    await this.sampleManager.waitForReady();
 
     // Set up canvas dimensions - now using matrix[0] and matrix[1] to detect rotation
     let canvasWidth = undefined;
@@ -256,24 +255,7 @@ export class VideoProcessor {
     this.ctx.restore();
   }
 
-  async processFrame(frame) {
-    const frameTimeMs = Math.floor(frame.timestamp / 1000);
-
-    // Skip frames before start time
-    if (
-      this.timeRangeStart !== undefined &&
-      frameTimeMs < this.timeRangeStart
-    ) {
-      frame.close();
-      return;
-    }
-
-    // Stop processing after end time
-    if (this.timeRangeEnd !== undefined && frameTimeMs > this.timeRangeEnd) {
-      frame.close();
-      return;
-    }
-
+  async waitForPreviousPromise() {
     let tempPromise = this.previousPromise;
     while (tempPromise) {
       await tempPromise;
@@ -281,6 +263,39 @@ export class VideoProcessor {
         break;
       }
       tempPromise = this.previousPromise;
+    }
+    this.previousPromise = null;
+    return true;
+  }
+
+  async processFrame(frame) {
+    const frameTimeMs = Math.floor(frame.timestamp / 1000);
+    if (this.timeRangeStart === undefined || this.timeRangeEnd === undefined) {
+      throw new Error("Time range not set");
+    }
+
+    // Skip frames before start time
+    if (frameTimeMs < this.timeRangeStart) {
+      frame.close();
+      return;
+    }
+
+    // Stop processing after end time
+    if (frameTimeMs > this.timeRangeEnd) {
+      frame.close();
+      return;
+    }
+
+    // let tempPromise = this.previousPromise;
+    // while (tempPromise) {
+    //   await tempPromise;
+    //   if (tempPromise === this.previousPromise) {
+    //     break;
+    //   }
+    //   tempPromise = this.previousPromise;
+    // }
+    while (this.previousPromise) {
+      await this.waitForPreviousPromise();
     }
 
     try {
@@ -306,6 +321,37 @@ export class VideoProcessor {
       console.error("Error processing frame:", error);
     }
   }
+
+  async handleDecoderOutput(frame) {
+    if (this.state === "processing" || this.state === "exhausted") {
+      this.outputTaskPromises.push(this.processFrame(frame));
+      return;
+    }
+    if (this.state !== "initialized") {
+      frame.close();
+      throw new Error("Processor should be in the initialized state");
+    }
+    this.drawFrame(frame);
+    frame.close();
+  }
+
+  async renderSampleInPercentage(percentage) {
+    if (this.state !== "initialized") {
+      throw new Error("Processor should be in the initialized state");
+    }
+
+    while (this.previousPromise) {
+      await this.waitForPreviousPromise();
+    }
+
+    const samples = this.sampleManager.findSamplesAtPercentage(percentage);
+    for (const sample of samples) {
+      const encodedVideoChunk =
+        SampleManager.encodedVideoChunkFromSample(sample);
+      this.decoder.decode(encodedVideoChunk);
+    }
+    this.previousPromise = this.decoder.flush();
+  }
 }
 
 // MP4 demuxer class implementation
@@ -319,6 +365,7 @@ class MP4Demuxer {
     this.file.onReady = this.onReady.bind(this);
     this.file.onSamples = this.onSamples.bind(this);
     this.nb_samples = 0;
+    this.passed_samples = 0;
     this.stopProcessingSamples = false;
     this.sampleManager = sampleManager;
     this.setupFile(uri);
@@ -386,7 +433,12 @@ class MP4Demuxer {
 
   onSamples(track_id, ref, samples) {
     if (this.stopProcessingSamples) return;
+    this.passed_samples += samples.length;
     this.sampleManager.addSamples(samples);
+    if (this.passed_samples >= this.nb_samples) {
+      this.stopProcessingSamples = true;
+      this.sampleManager.finalize();
+    }
   }
 }
 

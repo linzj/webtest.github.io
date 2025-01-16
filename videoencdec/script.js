@@ -33,9 +33,6 @@ document.getElementById("videoInput").addEventListener("change", async (e) => {
     return;
   }
 
-  // Enable the process button when a file is selected
-  document.getElementById("processButton").disabled = false;
-
   // Initialize slider when video is loaded
   if (file) {
     // You'll need to get the total frame count from your video processing logic
@@ -43,6 +40,12 @@ document.getElementById("videoInput").addEventListener("change", async (e) => {
     frameRangeSlider.initialize(0); // Initially set to 0, update when frame count is known
     processor.onInitialized = (nb_samples) => {
       frameRangeSlider.initialize(nb_samples);
+      // Enable the process button when processing is initialized
+      document.getElementById("processButton").disabled = false;
+
+      frameRangeSlider.onupdatepercentage = (percentage) => {
+        processor.renderSampleInPercentage(percentage);
+      };
     };
     processor.initFile(file);
   }

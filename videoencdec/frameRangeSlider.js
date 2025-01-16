@@ -28,10 +28,51 @@ export class FrameRangeSlider {
       });
     });
 
-    this.sliderTrack.addEventListener(
-      "mousedown",
-      this.handleSliderMouseDown.bind(this)
-    );
+    // Add mouse and touch events to both thumbs
+    [this.thumbStart, this.thumbEnd].forEach((thumb) => {
+      thumb.addEventListener("mousedown", this.handleStart.bind(this));
+      thumb.addEventListener("touchstart", this.handleStart.bind(this));
+    });
+  }
+
+  handleStart(e) {
+    e.preventDefault();
+    const thumb = e.target;
+    this.isDragging = thumb.id;
+
+    const handleMove = (e) => this.handleMove(e);
+    const handleEnd = (e) => {
+      document.removeEventListener("mousemove", handleMove);
+      document.removeEventListener("mouseup", handleEnd);
+      document.removeEventListener("touchmove", handleMove);
+      document.removeEventListener("touchend", handleEnd);
+      this.isDragging = null;
+    };
+
+    document.addEventListener("mousemove", handleMove);
+    document.addEventListener("mouseup", handleEnd);
+    document.addEventListener("touchmove", handleMove);
+    document.addEventListener("touchend", handleEnd);
+  }
+
+  handleMove(e) {
+    if (!this.isDragging) return;
+
+    const rect = this.sliderTrack.getBoundingClientRect();
+    const clientX = e.type.includes("touch") ? e.touches[0].clientX : e.clientX;
+
+    let percent = ((clientX - rect.left) / rect.width) * 100;
+    percent = Math.max(0, Math.min(100, percent));
+
+    if (this.isDragging === "thumbStart") {
+      this.startPercent = Math.min(percent, this.endPercent - 1);
+      this.onUpdatePercentage(this.startPercent);
+    } else {
+      this.endPercent = Math.max(percent, this.startPercent + 1);
+      this.onUpdatePercentage(this.endPercent);
+    }
+
+    this.updateSliderDisplay();
   }
 
   initialize(totalFrames) {
@@ -54,46 +95,6 @@ export class FrameRangeSlider {
     this.endFrameDisplay.textContent = endFrame;
   }
 
-  handleSliderMouseDown(e) {
-    const thumb = e.target;
-    if (thumb.classList.contains("slider-thumb")) {
-      this.isDragging = thumb.id;
-      document.addEventListener(
-        "mousemove",
-        this.handleSliderMouseMove.bind(this)
-      );
-      document.addEventListener("mouseup", this.handleSliderMouseUp.bind(this));
-    }
-  }
-
-  handleSliderMouseMove(e) {
-    if (!this.isDragging) return;
-
-    const rect = this.sliderTrack.getBoundingClientRect();
-    let percent = ((e.clientX - rect.left) / rect.width) * 100;
-    percent = Math.max(0, Math.min(100, percent));
-
-    if (this.isDragging === "thumbStart") {
-      this.startPercent = Math.min(percent, this.endPercent - 1);
-    } else {
-      this.endPercent = Math.max(percent, this.startPercent + 1);
-    }
-
-    this.updateSliderDisplay();
-  }
-
-  handleSliderMouseUp() {
-    this.isDragging = null;
-    document.removeEventListener(
-      "mousemove",
-      this.handleSliderMouseMove.bind(this)
-    );
-    document.removeEventListener(
-      "mouseup",
-      this.handleSliderMouseUp.bind(this)
-    );
-  }
-
   isSliderModeActive() {
     return this.sliderContainer.classList.contains("visible");
   }
@@ -104,5 +105,11 @@ export class FrameRangeSlider {
       startFrame: Math.floor((this.startPercent / 100) * totalFrames),
       endFrame: Math.floor((this.endPercent / 100) * totalFrames),
     };
+  }
+
+  onUpdatePercentage(percentage) {
+    if (this.onupdatepercentage) {
+      this.onupdatepercentage(percentage);
+    }
   }
 }
