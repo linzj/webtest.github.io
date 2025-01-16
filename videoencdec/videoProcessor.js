@@ -28,6 +28,7 @@ export class VideoProcessor {
     this.startIndex = undefined;
     this.endIndex = undefined;
     this.isChromeBased = false;
+    this.previewFrameTimeStamp = 0;
   }
 
   setStatus(phase, message) {
@@ -331,8 +332,13 @@ export class VideoProcessor {
       frame.close();
       throw new Error("Processor should be in the initialized state");
     }
+    if (Math.floor(this.previewFrameTimeStamp) !== Math.floor(frame.timestamp / 1000.0)) {
+      frame.close();
+      return;
+    }
     this.drawFrame(frame);
     frame.close();
+    this.previewFrameTimeStamp = 0;
   }
 
   async renderSampleInPercentage(percentage) {
@@ -340,11 +346,19 @@ export class VideoProcessor {
       throw new Error("Processor should be in the initialized state");
     }
 
+    const samples = this.sampleManager.findSamplesAtPercentage(percentage);
+    this.previewFrameTimeStamp = SampleManager.sampleTimeMs(
+      samples[samples.length - 1]
+    );
+    const currentPreviewFrameTs = this.previewFrameTimeStamp;
     while (this.previousPromise) {
       await this.waitForPreviousPromise();
     }
 
-    const samples = this.sampleManager.findSamplesAtPercentage(percentage);
+    if (currentPreviewFrameTs !== this.previewFrameTimeStamp) {
+      return;
+    }
+
     for (const sample of samples) {
       const encodedVideoChunk =
         SampleManager.encodedVideoChunkFromSample(sample);
