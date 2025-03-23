@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGPU Capabilities</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+        h1, h2, h3 {
+            color: #2c3e50;
+        }
+        .container {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .not-supported {
+            background-color: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 5px;
+            text-align: center;
+        }
+        .feature-list, .limits-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 10px;
+        }
+        .feature-item, .limit-item {
+            padding: 8px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            border-left: 4px solid #4CAF50;
+        }
+        .feature-item.unavailable {
+            border-left-color: #f44336;
+            text-decoration: line-through;
+            opacity: 0.7;
+        }
+        .loader {
+            text-align: center;
+            padding: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        table, th, td {
+            border: 1px solid #ddd;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+    </style>
+</head>
+<body>
+    <h1>WebGPU Capabilities Explorer</h1>
+
+    <div id="support-status" class="container">
+        <h2>WebGPU Support</h2>
+        <p id="support-message">Checking WebGPU support...</p>
+    </div>
+
+    <div id="adapter-info" class="container" style="display: none;">
+        <h2>Adapter Information</h2>
+        <table id="adapter-attributes">
+            <tr>
+                <th>Property</th>
+                <th>Value</th>
+            </tr>
+        </table>
+    </div>
+
+    <div id="adapter-features" class="container" style="display: none;">
+        <h2>Adapter Features</h2>
+        <div id="features-list" class="feature-list"></div>
+    </div>
+
+    <div id="device-info" class="container" style="display: none;">
+        <h2>Device Limits</h2>
+        <table id="device-limits">
+            <tr>
+                <th>Limit</th>
+                <th>Value</th>
+            </tr>
+        </table>
+    </div>
+
+    <div id="device-features" class="container" style="display: none;">
+        <h2>Device Features</h2>
+        <div id="device-features-list" class="feature-list"></div>
+    </div>
+
+    <script>
+        // Remove the predefined features list since we'll get the actual features from the adapter
+        // const allFeatures = [ ... ];
+
+        async function checkWebGPUSupport() {
+            const supportMessage = document.getElementById('support-message');
+
+            if (!navigator.gpu) {
+                supportMessage.innerHTML = '<div class="not-supported">WebGPU is not supported in this browser</div>';
+                return false;
+            }
+
+            try {
+                const adapter = await navigator.gpu.requestAdapter();
+                if (!adapter) {
+                    supportMessage.innerHTML = '<div class="not-supported">Failed to get WebGPU adapter</div>';
+                    return false;
+                }
+
+                supportMessage.innerHTML = '<strong style="color: green;">✓ WebGPU is supported!</strong>';
+                return adapter;
+            } catch (error) {
+                supportMessage.innerHTML = `<div class="not-supported">Error initializing WebGPU: ${error.message}</div>`;
+                return false;
+            }
+        }
+
+        function displayAdapterInfo(adapter) {
+            const adapterInfoDiv = document.getElementById('adapter-info');
+            const adapterAttributesTable = document.getElementById('adapter-attributes');
+            adapterInfoDiv.style.display = 'block';
+
+            const info = adapter.info || {};
+
+            // Add adapter info to table
+            const properties = [
+                { name: 'Vendor', value: info.vendor || 'Unknown' },
+                { name: 'Architecture', value: info.architecture || 'Unknown' },
+                { name: 'Device', value: info.device || 'Unknown' },
+                { name: 'Description', value: info.description || 'Unknown' },
+                { name: 'Is Fallback Adapter', value: adapter.isFallbackAdapter ? 'Yes' : 'No' }
+            ];
+
+            properties.forEach(prop => {
+                const row = document.createElement('tr');
+                const nameCell = document.createElement('td');
+                const valueCell = document.createElement('td');
+
+                nameCell.textContent = prop.name;
+                valueCell.textContent = prop.value;
+
+                row.appendChild(nameCell);
+                row.appendChild(valueCell);
+                adapterAttributesTable.appendChild(row);
+            });
+        }
+
+        function displayAdapterFeatures(adapter) {
+            const featuresDiv = document.getElementById('adapter-features');
+            const featuresList = document.getElementById('features-list');
+            featuresDiv.style.display = 'block';
+
+            // Clear existing content
+            featuresList.innerHTML = '';
+
+            // Display all features available from the adapter itself
+            if (adapter.features.size === 0) {
+                const noFeaturesItem = document.createElement('div');
+                noFeaturesItem.className = 'feature-item';
+                noFeaturesItem.textContent = 'No features reported by adapter';
+                featuresList.appendChild(noFeaturesItem);
+            } else {
+                // Iterate through all features available on the adapter
+                adapter.features.forEach(feature => {
+                    const featureItem = document.createElement('div');
+                    featureItem.className = 'feature-item';
+                    featureItem.textContent = feature;
+                    featuresList.appendChild(featureItem);
+                });
+            }
+        }
+
+        async function displayDeviceInfo(adapter) {
+            try {
+                const device = await adapter.requestDevice();
+
+                // Display device limits
+                const deviceInfoDiv = document.getElementById('device-info');
+                const deviceLimitsTable = document.getElementById('device-limits');
+                deviceInfoDiv.style.display = 'block';
+
+                // Clear existing content
+                while (deviceLimitsTable.rows.length > 1) {
+                    deviceLimitsTable.deleteRow(1);
+                }
+
+                // Add all limits to table
+                for (const limit in device.limits) {
+                    const value = device.limits[limit];
+                    const row = document.createElement('tr');
+                    const nameCell = document.createElement('td');
+                    const valueCell = document.createElement('td');
+
+                    nameCell.textContent = limit;
+                    valueCell.textContent = value;
+
+                    row.appendChild(nameCell);
+                    row.appendChild(valueCell);
+                    deviceLimitsTable.appendChild(row);
+                }
+
+                // Display device features
+                const deviceFeaturesDiv = document.getElementById('device-features');
+                const deviceFeaturesList = document.getElementById('device-features-list');
+                deviceFeaturesDiv.style.display = 'block';
+
+                // Clear existing content
+                deviceFeaturesList.innerHTML = '';
+
+                // Display all features available from the device itself
+                if (device.features.size === 0) {
+                    const noFeaturesItem = document.createElement('div');
+                    noFeaturesItem.className = 'feature-item';
+                    noFeaturesItem.textContent = 'No features reported by device';
+                    deviceFeaturesList.appendChild(noFeaturesItem);
+                } else {
+                    // Iterate through all features available on the device
+                    device.features.forEach(feature => {
+                        const featureItem = document.createElement('div');
+                        featureItem.className = 'feature-item';
+                        featureItem.textContent = feature;
+                        deviceFeaturesList.appendChild(featureItem);
+                    });
+                }
+
+            } catch (error) {
+                console.error('Error requesting device:', error);
+                const deviceInfoDiv = document.getElementById('device-info');
+                deviceInfoDiv.style.display = 'block';
+                deviceInfoDiv.innerHTML += `<div class="not-supported">Error requesting device: ${error.message}</div>`;
+            }
+        }
+
+        async function init() {
+            const adapter = await checkWebGPUSupport();
+            if (adapter) {
+                displayAdapterInfo(adapter);
+                displayAdapterFeatures(adapter);
+                await displayDeviceInfo(adapter);
+            }
+        }
+
+        // Initialize on page load
+        window.addEventListener('load', init);
+    </script>
+</body>
+</html>
