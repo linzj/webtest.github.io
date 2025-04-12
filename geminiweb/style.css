@@ -166,3 +166,55 @@ body {
   text-align: center;
   cursor: pointer;
 }
+
+/* --- Markdown Styles --- */
+
+.message-content pre {
+  background-color: #2d2d2d; /* Dark background for code blocks */
+  color: #f1f1f1; /* Light text */
+  padding: 15px;
+  border-radius: 5px;
+  overflow-x: auto; /* Allow horizontal scrolling for long lines */
+  white-space: pre; /* Preserve whitespace and prevent wrapping */
+  margin: 10px 0;
+}
+
+.message-content code {
+  font-family: Consolas, Monaco, "Andale Mono", "Ubuntu Mono", monospace;
+  background-color: #e0e0e0; /* Lighter background for inline code */
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
+
+/* Style code within pre blocks differently (no extra background) */
+.message-content pre code {
+  background-color: transparent;
+  padding: 0;
+  border-radius: 0;
+  font-size: inherit; /* Inherit font size from pre */
+}
+
+.message-content blockquote {
+  border-left: 4px solid #ccc;
+  padding-left: 10px;
+  margin-left: 0;
+  color: #555;
+}
+
+.message-content ul,
+.message-content ol {
+  margin-left: 20px;
+  padding-left: 15px;
+}
+
+.message-content h1,
+.message-content h2,
+.message-content h3,
+.message-content h4,
+.message-content h5,
+.message-content h6 {
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+  font-weight: 600;
+}

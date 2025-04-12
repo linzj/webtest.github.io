@@ -77,8 +77,35 @@ function addMessage(sender, contentParts) {
 
   contentParts.forEach((part) => {
     if (part.text) {
-      const textNode = document.createTextNode(part.text);
-      contentDiv.appendChild(textNode);
+      // 1. Parse Markdown
+      // Use { breaks: true } in marked options to interpret single newlines as <br>
+      const markdownHtml = marked.parse(part.text, { breaks: true });
+      // 2. Set innerHTML (this handles HTML tags from Markdown)
+      // Create a temporary div to avoid potential issues if contentDiv already has children
+      const tempDiv = document.createElement("div");
+      tempDiv.innerHTML = markdownHtml;
+      // Append children from tempDiv to contentDiv
+      while (tempDiv.firstChild) {
+        contentDiv.appendChild(tempDiv.firstChild);
+      }
+      // 3. Render LaTeX using KaTeX auto-render
+      // Ensure KaTeX and its auto-render extension are loaded before calling this
+      if (window.renderMathInElement) {
+        renderMathInElement(contentDiv, {
+          // customised options
+          // • auto-render specific keys, e.g.:
+          delimiters: [
+            { left: "$$", right: "$$", display: true },
+            { left: "$", right: "$", display: false },
+            { left: "\\(", right: "\\)", display: false },
+            { left: "\\[", right: "\\]", display: true },
+          ],
+          // • rendering keys, e.g.:
+          throwOnError: false,
+        });
+      } else {
+        console.warn("KaTeX auto-render not loaded yet.");
+      }
     } else if (part.inlineData) {
       const mimeType = part.inlineData.mimeType;
       const data = part.inlineData.data;
