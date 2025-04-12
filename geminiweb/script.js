@@ -405,6 +405,40 @@ async function deleteSession(sessionIdToDelete) {
 
 // --- Message DB Functions (Modified) ---
 
+// New function to ONLY get formatted history from DB
+async function getHistoryForSession(sessionId) {
+  if (!db || !sessionId) {
+    console.warn(
+      "Database not open or no session ID provided. Cannot get history."
+    );
+    return []; // Return empty history if DB/session invalid
+  }
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([MSG_STORE_NAME], "readonly");
+    const store = transaction.objectStore(MSG_STORE_NAME);
+    const index = store.index("sessionId");
+    const request = index.getAll(IDBKeyRange.only(sessionId));
+
+    request.onsuccess = (event) => {
+      const messages = event.target.result || [];
+      // Sort by timestamp
+      messages.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+      // Format for startChat history
+      const formattedHistory = messages.map((msg) => ({
+        role: msg.sender === "user" ? "user" : "model",
+        // Ensure parts is always an array, even if DB stores null/undefined
+        parts: Array.isArray(msg.contentParts) ? msg.contentParts : [],
+      }));
+      resolve(formattedHistory);
+    };
+
+    request.onerror = (event) => {
+      console.error("Error getting history from DB:", event.target.error);
+      reject(event.target.error); // Propagate the error
+    };
+  });
+}
+
 async function saveMessageToDb(message) {
   if (!db || !currentSessionId) {
     console.error(
@@ -436,41 +470,50 @@ async function saveMessageToDb(message) {
 async function loadHistoryFromDb(sessionId) {
   if (!db || !sessionId) {
     console.error(
-      "Database not open or no session ID provided. Cannot load history."
+      "Database not open or no session ID provided. Cannot load history display."
     );
-    return;
+    return; // Don't proceed if no session
   }
-  return new Promise((resolve, reject) => {
+  try {
+    // 1. Get the formatted history (don't need the return value here, just reusing the fetch logic)
+    // We fetch the raw messages again here to display them, as getHistoryForSession formats them for the API
     const transaction = db.transaction([MSG_STORE_NAME], "readonly");
     const store = transaction.objectStore(MSG_STORE_NAME);
-    const index = store.index("sessionId"); // Use the sessionId index
-    const request = index.getAll(IDBKeyRange.only(sessionId)); // Get messages for this session
+    const index = store.index("sessionId");
+    const request = index.getAll(IDBKeyRange.only(sessionId));
 
     request.onsuccess = (event) => {
-      const messages = event.target.result;
-      // Sort by timestamp
+      const messages = event.target.result || [];
       messages.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
       console.log(
-        `Loaded ${messages.length} messages for session ${sessionId} from DB.`
+        `Loaded ${messages.length} messages for session ${sessionId} from DB for display.`
       );
+
+      // 2. Clear existing display
+      chatHistory.innerHTML = "";
+
+      // 3. Display messages one by one
       messages.forEach((msg) => {
         // Call addMessage WITHOUT saving again
         addMessage(msg.sender, msg.contentParts, false);
       });
-      resolve(messages); // Resolve with the loaded messages
     };
-
     request.onerror = (event) => {
-      console.error("Error loading history from DB:", event.target.error);
-      reject(event.target.error);
+      throw event.target.error; // Throw error to be caught below
     };
-  });
+  } catch (error) {
+    console.error("Error loading or displaying history from DB:", error);
+    chatHistory.innerHTML = `<p class="error-message">Error loading chat history for session ${sessionId}.</p>`;
+    // Don't reject the promise here, just log the error and show message
+  }
 }
 
 // --- API Key Handling & Initialization ---
 
 // Function to initialize or re-initialize the chat object
-function initializeChatObject(modelName) {
+// Accepts pre-loaded history. Made synchronous again.
+function initializeChatObject(modelName, history = []) {
+  // Add history parameter with default
   if (!genAI || !modelName) {
     console.error("GenAI not initialized or no model name provided.");
     chat = null; // Ensure chat is null if initialization fails
@@ -481,8 +524,10 @@ function initializeChatObject(modelName) {
     const model = genAI.getGenerativeModel({ model: modelName });
 
     // --- Prepare StartChatParams ---
+    // Use the passed-in history
+    console.log(`Initializing chat with ${history.length} history entries.`);
     const startChatParams = {
-      history: [], // Start fresh context for the SDK
+      history: history, // Use the provided history
       tools: [], // Initialize empty tools array
     };
 
@@ -551,26 +596,12 @@ async function initializeGenAI() {
         // Proceed without models loaded if necessary, selector will be empty/default
       }
 
-      // 4. Initialize Chat Object with the selected/default model
-      if (currentModelName) {
-        if (!initializeChatObject(currentModelName)) {
-          // Handle case where the selected model fails to initialize
-          keyStatus.textContent += ` Failed to init model: ${currentModelName}.`;
-          keyStatus.style.color = "red";
-          // Maybe try a fallback model? Or just leave chat unusable.
-        } else {
-          keyStatus.textContent += ` Chat ready (${currentModelName}).`;
-        }
-      } else {
-        keyStatus.textContent += " No model selected/available.";
-        keyStatus.style.color = "orange";
-      }
-
-      // 5. Load Sessions and History (Requires DB)
+      // 4. Determine Active Session and Load its History
+      let initialHistory = [];
       if (db) {
-        chatHistory.innerHTML = "";
+        // chatHistory.innerHTML = ""; // Clearing is now handled by loadHistoryFromDb/switchSession
         try {
-          await loadSessions(); // Populates session dropdown
+          await loadSessions(); // Populates session dropdown, potentially creates first session
 
           const lastSessionIdStr = localStorage.getItem(LAST_SESSION_KEY);
           let sessionToLoad = null;
@@ -601,20 +632,41 @@ async function initializeGenAI() {
             currentSessionId = null;
           }
 
-          // Load history for the active session
+          // Load history DISPLAY for the active session
           if (currentSessionId) {
-            await loadHistoryFromDb(currentSessionId);
+            await loadHistoryFromDb(currentSessionId); // Loads display
+            // NOW, load the formatted history for startChat
+            initialHistory = await getHistoryForSession(currentSessionId);
           }
         } catch (sessionError) {
           console.error("Error loading sessions/history:", sessionError);
           keyStatus.textContent += " (Error loading sessions)";
           keyStatus.style.color = "orange";
+          // Proceed with empty history if session loading fails
         }
       } else {
         // Handle case where DB is not available for sessions
         keyStatus.textContent += " (DB unavailable for sessions)";
         keyStatus.style.color = "orange";
       }
+
+      // 5. Initialize Chat Object with the selected/default model AND loaded history
+      if (currentModelName) {
+        // Pass the loaded initialHistory here
+        if (!initializeChatObject(currentModelName, initialHistory)) {
+          // Handle case where the selected model fails to initialize
+          keyStatus.textContent += ` Failed to init model: ${currentModelName}.`;
+          keyStatus.style.color = "red";
+          // Maybe try a fallback model? Or just leave chat unusable.
+        } else {
+          keyStatus.textContent += ` Chat ready (${currentModelName}).`;
+        }
+      } else {
+        keyStatus.textContent += " No model selected/available.";
+        keyStatus.style.color = "orange";
+      }
+
+      // Step 5 (Load Sessions/History) is now integrated into Step 4 above.
     } catch (error) {
       // Catch errors during GenAI initialization
       console.error("Error initializing GoogleGenerativeAI:", error);
@@ -655,15 +707,25 @@ saveKeyButton.addEventListener("click", () => {
 });
 
 // Model Management Listeners (New)
-modelSelector.addEventListener("change", (event) => {
+// Make the listener async to use await
+modelSelector.addEventListener("change", async (event) => {
   const selectedModel = event.target.value;
   if (selectedModel && selectedModel !== currentModelName) {
     console.log("Model selection changed to:", selectedModel);
     currentModelName = selectedModel;
     localStorage.setItem(LAST_MODEL_KEY, currentModelName);
-    // Re-initialize the chat object with the new model
-    // This will clear the SDK's internal chat history context
-    if (!initializeChatObject(currentModelName)) {
+    // Load history for the current session before re-initializing
+    let history = [];
+    if (currentSessionId) {
+      try {
+        history = await getHistoryForSession(currentSessionId);
+      } catch (error) {
+        console.error("Error loading history on model change:", error);
+        // Proceed with empty history
+      }
+    }
+    // Re-initialize the chat object with the new model and loaded history
+    if (!initializeChatObject(currentModelName, history)) {
       alert(`Failed to switch to model: ${currentModelName}. Check console.`);
       // Optionally revert selection or disable sending
     } else {
@@ -703,10 +765,22 @@ addModelButton.addEventListener("click", async () => {
 });
 
 // Google Search Checkbox Listener (New)
-useGoogleSearchCheckbox.addEventListener("change", () => {
+// Make the listener async to use await
+useGoogleSearchCheckbox.addEventListener("change", async () => {
   console.log("Google Search checkbox changed. Re-initializing chat object...");
   if (currentModelName) {
-    if (!initializeChatObject(currentModelName)) {
+    // Load history for the current session before re-initializing
+    let history = [];
+    if (currentSessionId) {
+      try {
+        history = await getHistoryForSession(currentSessionId);
+      } catch (error) {
+        console.error("Error loading history on search toggle:", error);
+        // Proceed with empty history
+      }
+    }
+    // Re-initialize the chat object with the current model, loaded history, and new search setting
+    if (!initializeChatObject(currentModelName, history)) {
       alert(
         `Failed to re-initialize chat with new Google Search setting for model: ${currentModelName}. Check console.`
       );
