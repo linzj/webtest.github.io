@@ -87,6 +87,15 @@ body {
   position: relative; /* Needed for absolute positioning of the copy button */
 }
 
+/* Style for the token usage info */
+.token-usage-info {
+  font-size: 0.75em; /* Smaller font size */
+  color: #666; /* Grey color */
+  margin-top: 5px; /* Space above it */
+  text-align: right; /* Align to the right within the message bubble */
+  padding-right: 5px; /* Small padding from the edge */
+}
+
 .copy-button {
   position: absolute;
   top: 5px;
