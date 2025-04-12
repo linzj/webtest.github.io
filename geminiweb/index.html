@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemini Chat</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div id="api-key-section">
+        <label for="api-key">Gemini API Key:</label>
+        <input type="password" id="api-key" placeholder="Enter your API Key">
+        <button id="save-key">Save Key</button>
+        <p id="key-status"></p>
+    </div>
+
+    <div id="chat-container">
+        <div id="chat-history">
+            <!-- Chat messages will appear here -->
+        </div>
+        <div id="input-area">
+            <textarea id="message-input" placeholder="Type your message or drop files here..."></textarea>
+            <input type="file" id="file-input" accept="image/*,video/*" multiple style="display: none;">
+            <button id="attach-button">📎</button>
+            <button id="send-button">Send</button>
+        </div>
+        <div id="preview-area">
+            <!-- File previews will appear here -->
+        </div>
+    </div>
+
+    <!-- The SDK will be imported within script.js now -->
+    <script type="module" src="script.js"></script>
+</body>
+
+</html>
