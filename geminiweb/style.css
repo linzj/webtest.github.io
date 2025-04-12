@@ -46,6 +46,95 @@ body {
   margin-top: 5px;
 }
 
+/* --- Model Management Styles --- */
+#model-management {
+  margin-bottom: 20px;
+  padding: 15px;
+  background-color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  display: flex; /* Align items horizontally */
+  align-items: center; /* Center items vertically */
+  flex-wrap: wrap; /* Allow wrapping on smaller screens */
+  gap: 10px; /* Add spacing between elements */
+}
+
+#model-management label {
+  margin-right: 5px; /* Smaller margin */
+}
+
+#model-selector,
+#new-model-name {
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  flex-grow: 1; /* Allow input/select to grow */
+  min-width: 150px; /* Minimum width */
+}
+
+#add-model-button {
+  padding: 8px 15px;
+  background-color: #28a745; /* Green color */
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+#add-model-button:hover {
+  background-color: #218838; /* Darker green */
+}
+/* --- End Model Management Styles --- */
+
+/* --- Session Management Styles --- */
+#session-management {
+  margin-bottom: 20px;
+  padding: 15px;
+  background-color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+#session-management label {
+  margin-right: 5px;
+}
+
+#session-selector {
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  flex-grow: 1;
+  min-width: 150px;
+}
+
+#new-session-button,
+#delete-session-button {
+  padding: 8px 15px;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+#new-session-button {
+  background-color: #17a2b8; /* Teal */
+}
+#new-session-button:hover {
+  background-color: #138496;
+}
+
+#delete-session-button {
+  background-color: #dc3545; /* Red */
+}
+#delete-session-button:hover {
+  background-color: #c82333;
+}
+/* --- End Session Management Styles --- */
+
 #chat-container {
   width: 80%;
   max-width: 800px;

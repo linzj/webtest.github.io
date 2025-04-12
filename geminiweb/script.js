@@ -12,20 +12,26 @@ const fileInput = document.getElementById("file-input");
 const previewArea = document.getElementById("preview-area");
 const sessionSelector = document.getElementById("session-selector");
 const newSessionButton = document.getElementById("new-session-button");
-const deleteSessionButton = document.getElementById("delete-session-button"); // Added
+const deleteSessionButton = document.getElementById("delete-session-button");
+const modelSelector = document.getElementById("model-selector"); // Added
+const newModelNameInput = document.getElementById("new-model-name"); // Added
+const addModelButton = document.getElementById("add-model-button"); // Added
 
 let genAI;
-let chat;
+let chat; // Will be re-initialized when model changes
 let apiKey = localStorage.getItem("geminiApiKey");
 let attachedFiles = []; // To store { name, type, dataUrl, file }
 let currentSessionId = null; // Track the active session ID
+let currentModelName = null; // Track the active model name
 const LAST_SESSION_KEY = "lastActiveSessionId"; // localStorage key
+const LAST_MODEL_KEY = "lastSelectedModel"; // localStorage key for model
 
 // --- IndexedDB Setup ---
-const DB_NAME = "geminiChatHistoryDB";
-const DB_VERSION = 2; // Increment version for schema change
+const DB_NAME = "geminiChatDB"; // Renamed slightly for clarity
+const DB_VERSION = 3; // <<<< INCREMENT VERSION FOR NEW STORE >>>>
 const MSG_STORE_NAME = "chatMessages";
 const SESSION_STORE_NAME = "sessions";
+const MODEL_STORE_NAME = "customModels"; // Added store name
 let db; // Database connection variable
 
 async function openDb() {
@@ -47,12 +53,12 @@ async function openDb() {
     // or the database is created for the first time.
     request.onupgradeneeded = (event) => {
       const dbInstance = event.target.result;
-      const transaction = event.target.transaction; // Get transaction for upgrade
+      const transaction = event.target.transaction;
       console.log(
         `Upgrading database from version ${event.oldVersion} to ${event.newVersion}...`
       );
 
-      // Create sessions store if it doesn't exist (for new DB or upgrade from v1)
+      // Create sessions store if it doesn't exist
       if (!dbInstance.objectStoreNames.contains(SESSION_STORE_NAME)) {
         const sessionStore = dbInstance.createObjectStore(SESSION_STORE_NAME, {
           keyPath: "id",
@@ -86,7 +92,106 @@ async function openDb() {
         console.log("Index 'sessionId' created on", MSG_STORE_NAME);
       }
 
+      // Create models store if it doesn't exist (added in v3)
+      if (!dbInstance.objectStoreNames.contains(MODEL_STORE_NAME)) {
+        const modelStore = dbInstance.createObjectStore(MODEL_STORE_NAME, {
+          keyPath: "name", // Use the model name as the key
+        });
+        // No indexes needed for now, just storing names
+        console.log("Object store created:", MODEL_STORE_NAME);
+      }
+
       console.log("Database upgrade complete.");
+    };
+  });
+}
+
+// --- Model Management Functions (New) ---
+
+async function loadModels() {
+  return new Promise(async (resolve, reject) => {
+    const defaultModels = [
+      "gemini-2.5-pro-exp-03-25", // Original default
+      "gemini-2.5-pro-preview-03-25", // New default
+      // Add other relevant default models if desired
+      "gemini-1.5-pro-latest",
+      "gemini-1.5-flash-latest",
+      "gemini-pro", // Older text-only model
+    ];
+    let customModels = [];
+
+    if (db) {
+      try {
+        customModels = await getAllModelsFromDb();
+      } catch (error) {
+        console.error("Error loading custom models from DB:", error);
+        // Proceed with defaults even if DB load fails
+      }
+    }
+
+    const allModels = [...defaultModels, ...customModels.map((m) => m.name)];
+    // Remove duplicates (e.g., if a default was manually added)
+    const uniqueModels = [...new Set(allModels)];
+    uniqueModels.sort(); // Sort alphabetically
+
+    modelSelector.innerHTML = ""; // Clear existing options
+    uniqueModels.forEach((modelName) => {
+      const option = document.createElement("option");
+      option.value = modelName;
+      option.textContent = modelName;
+      modelSelector.appendChild(option);
+    });
+
+    // Select the last used model or the first default
+    const lastModel = localStorage.getItem(LAST_MODEL_KEY);
+    if (lastModel && uniqueModels.includes(lastModel)) {
+      modelSelector.value = lastModel;
+      currentModelName = lastModel;
+    } else if (uniqueModels.length > 0) {
+      // Default to the first in the sorted list if last used isn't valid
+      modelSelector.value = uniqueModels[0];
+      currentModelName = uniqueModels[0];
+      localStorage.setItem(LAST_MODEL_KEY, currentModelName); // Store the default selection
+    } else {
+      currentModelName = null; // No models available
+    }
+
+    console.log("Models loaded. Current model:", currentModelName);
+    resolve(uniqueModels);
+  });
+}
+
+async function getAllModelsFromDb() {
+  if (!db) return [];
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([MODEL_STORE_NAME], "readonly");
+    const store = transaction.objectStore(MODEL_STORE_NAME);
+    const request = store.getAll();
+
+    request.onsuccess = (event) => {
+      resolve(event.target.result || []);
+    };
+    request.onerror = (event) => {
+      console.error("Error getting all models from DB:", event.target.error);
+      reject(event.target.error);
+    };
+  });
+}
+
+async function saveModelToDb(modelName) {
+  if (!db || !modelName) return;
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([MODEL_STORE_NAME], "readwrite");
+    const store = transaction.objectStore(MODEL_STORE_NAME);
+    const request = store.put({ name: modelName }); // Use put to add or update
+
+    request.onsuccess = () => {
+      console.log("Model saved to DB:", modelName);
+      resolve();
+    };
+    request.onerror = (event) => {
+      console.error("Error saving model to DB:", event.target.error);
+      reject(event.target.error);
     };
   });
 }
@@ -361,104 +466,217 @@ async function loadHistoryFromDb(sessionId) {
   });
 }
 
-// --- API Key Handling ---
+// --- API Key Handling & Initialization ---
+
+// Function to initialize or re-initialize the chat object
+function initializeChatObject(modelName) {
+  if (!genAI || !modelName) {
+    console.error("GenAI not initialized or no model name provided.");
+    chat = null; // Ensure chat is null if initialization fails
+    return false;
+  }
+  try {
+    console.log(`Initializing chat with model: ${modelName}`);
+    const model = genAI.getGenerativeModel({ model: modelName });
+    // Start a new chat session; history is managed by our DB, not the SDK's internal history
+    chat = model.startChat({
+      history: [], // Start fresh context for the SDK
+    });
+    console.log("Chat object initialized successfully for model:", modelName);
+    return true;
+  } catch (error) {
+    console.error(`Error initializing chat for model ${modelName}:`, error);
+    keyStatus.textContent = `Error initializing model ${modelName}. Check model name/key.`;
+    keyStatus.style.color = "orange";
+    chat = null; // Ensure chat is null on error
+    return false;
+  }
+}
 
 async function initializeGenAI() {
-  // Make async to await DB operations
-  // Try to open the database first
+  // 1. Open Database
   try {
-    await openDb();
+    await openDb(); // Wait for DB to be ready
   } catch (error) {
     console.error("Failed to open IndexedDB:", error);
     keyStatus.textContent =
-      "Error initializing database. History may not work.";
+      "Error initializing database. History/Models may not work.";
     keyStatus.style.color = "orange";
-    // Continue initialization even if DB fails, but history won't load/save
+    // Allow continuing without DB, but features will be limited
   }
 
+  // 2. Check API Key and Initialize GenAI Instance
   if (apiKey) {
     try {
       genAI = new GoogleGenerativeAI(apiKey);
-      // Use a model that supports multimodal input, like gemini-pro-vision
-      // Or the newer gemini-1.5-flash or gemini-1.5-pro models
-      const model = genAI.getGenerativeModel({
-        model: "gemini-2.5-pro-exp-03-25",
-      });
-      chat = model.startChat({
-        // You might want to load/save history if needed
-        // history: [],
-        // generationConfig: { maxOutputTokens: 100 } // Optional config
-      });
-      keyStatus.textContent = "API Key loaded successfully.";
+      keyStatus.textContent = "API Key loaded. "; // Initial status
       keyStatus.style.color = "green";
-      apiKeyInput.value = apiKey; // Show the key (masked by type="password")
-      document.getElementById("chat-container").style.display = "flex"; // Show chat
+      apiKeyInput.value = apiKey;
+      document.getElementById("chat-container").style.display = "flex";
 
-      // Load sessions and determine active session
+      // 3. Load Models (Requires DB potentially)
+      try {
+        await loadModels(); // Populates dropdown, sets currentModelName
+        keyStatus.textContent += "Models loaded. ";
+      } catch (modelError) {
+        console.error("Error loading models:", modelError);
+        keyStatus.textContent += " (Error loading models)";
+        keyStatus.style.color = "orange";
+        // Proceed without models loaded if necessary, selector will be empty/default
+      }
+
+      // 4. Initialize Chat Object with the selected/default model
+      if (currentModelName) {
+        if (!initializeChatObject(currentModelName)) {
+          // Handle case where the selected model fails to initialize
+          keyStatus.textContent += ` Failed to init model: ${currentModelName}.`;
+          keyStatus.style.color = "red";
+          // Maybe try a fallback model? Or just leave chat unusable.
+        } else {
+          keyStatus.textContent += ` Chat ready (${currentModelName}).`;
+        }
+      } else {
+        keyStatus.textContent += " No model selected/available.";
+        keyStatus.style.color = "orange";
+      }
+
+      // 5. Load Sessions and History (Requires DB)
       if (db) {
-        chatHistory.innerHTML = ""; // Clear history display initially
+        chatHistory.innerHTML = "";
         try {
-          await loadSessions(); // Populates dropdown, creates initial if needed
-          // Determine which session to load
-          const lastSessionId = localStorage.getItem(LAST_SESSION_KEY);
-          const selectedOption = sessionSelector.querySelector(
-            `option[value="${lastSessionId}"]`
-          );
+          await loadSessions(); // Populates session dropdown
 
-          if (lastSessionId && selectedOption) {
-            // If last session exists in dropdown, load it
-            currentSessionId = parseInt(lastSessionId, 10); // Ensure it's a number
+          const lastSessionIdStr = localStorage.getItem(LAST_SESSION_KEY);
+          let sessionToLoad = null;
+
+          if (lastSessionIdStr) {
+            const lastSessionId = parseInt(lastSessionIdStr, 10);
+            // Verify the session still exists in the dropdown
+            if (
+              sessionSelector.querySelector(`option[value="${lastSessionId}"]`)
+            ) {
+              sessionToLoad = lastSessionId;
+            }
+          }
+
+          if (sessionToLoad) {
+            currentSessionId = sessionToLoad;
             sessionSelector.value = currentSessionId;
             console.log("Loading last active session:", currentSessionId);
           } else if (sessionSelector.options.length > 0) {
-            // Otherwise, load the first session in the (sorted) list (newest)
+            // Default to the first session (newest) if last active is invalid/missing
             currentSessionId = parseInt(sessionSelector.options[0].value, 10);
             sessionSelector.value = currentSessionId;
-            localStorage.setItem(LAST_SESSION_KEY, currentSessionId); // Store as last active
+            localStorage.setItem(LAST_SESSION_KEY, currentSessionId);
             console.log("Loading newest session:", currentSessionId);
           } else {
-            // This case should ideally be handled by loadSessions creating an initial one
-            console.warn("No sessions found or created.");
+            // Should be handled by loadSessions creating one, but log if not
+            console.warn("No sessions found after loading.");
             currentSessionId = null;
           }
 
-          // Load history for the determined session
+          // Load history for the active session
           if (currentSessionId) {
             await loadHistoryFromDb(currentSessionId);
           }
         } catch (sessionError) {
-          console.error("Error loading/setting up sessions:", sessionError);
+          console.error("Error loading sessions/history:", sessionError);
           keyStatus.textContent += " (Error loading sessions)";
           keyStatus.style.color = "orange";
         }
+      } else {
+        // Handle case where DB is not available for sessions
+        keyStatus.textContent += " (DB unavailable for sessions)";
+        keyStatus.style.color = "orange";
       }
     } catch (error) {
-      console.error("Error initializing GenAI:", error);
-      keyStatus.textContent = `Error initializing: ${error.message}. Please check your key.`;
+      // Catch errors during GenAI initialization
+      console.error("Error initializing GoogleGenerativeAI:", error);
+      keyStatus.textContent = `Error initializing GenAI: ${error.message}. Check key/network.`;
       keyStatus.style.color = "red";
-      apiKey = null; // Invalidate the key
+      apiKey = null;
       localStorage.removeItem("geminiApiKey");
-      document.getElementById("chat-container").style.display = "none"; // Hide chat
+      document.getElementById("chat-container").style.display = "none";
+      genAI = null; // Ensure genAI is null
+      chat = null; // Ensure chat is null
     }
   } else {
+    // API Key not set
     keyStatus.textContent = "API Key not set.";
     keyStatus.style.color = "orange";
-    document.getElementById("chat-container").style.display = "none"; // Hide chat
+    document.getElementById("chat-container").style.display = "none";
   }
 }
+
+// --- Event Listeners ---
 
 saveKeyButton.addEventListener("click", () => {
   const newKey = apiKeyInput.value.trim();
   if (newKey) {
-    apiKey = newKey;
-    localStorage.setItem("geminiApiKey", apiKey);
-    initializeGenAI(); // Re-initialize with the new key
+    // Only re-initialize if the key actually changed
+    if (newKey !== apiKey) {
+      apiKey = newKey;
+      localStorage.setItem("geminiApiKey", apiKey);
+      console.log("New API Key saved. Re-initializing...");
+      initializeGenAI(); // Re-initialize everything with the new key
+    } else {
+      console.log("API Key unchanged.");
+    }
   } else {
     keyStatus.textContent = "Please enter an API Key.";
     keyStatus.style.color = "red";
   }
 });
 
+// Model Management Listeners (New)
+modelSelector.addEventListener("change", (event) => {
+  const selectedModel = event.target.value;
+  if (selectedModel && selectedModel !== currentModelName) {
+    console.log("Model selection changed to:", selectedModel);
+    currentModelName = selectedModel;
+    localStorage.setItem(LAST_MODEL_KEY, currentModelName);
+    // Re-initialize the chat object with the new model
+    // This will clear the SDK's internal chat history context
+    if (!initializeChatObject(currentModelName)) {
+      alert(`Failed to switch to model: ${currentModelName}. Check console.`);
+      // Optionally revert selection or disable sending
+    } else {
+      keyStatus.textContent = `API Key loaded. Models loaded. Chat ready (${currentModelName}).`; // Update status
+      keyStatus.style.color = "green";
+    }
+  }
+});
+
+addModelButton.addEventListener("click", async () => {
+  const newModel = newModelNameInput.value.trim();
+  if (!newModel) {
+    alert("Please enter a model name to add.");
+    return;
+  }
+  if (!db) {
+    alert("Database not available. Cannot save custom model.");
+    return;
+  }
+
+  try {
+    await saveModelToDb(newModel);
+    console.log("Custom model saved:", newModel);
+    newModelNameInput.value = ""; // Clear input
+
+    // Reload models to update the dropdown
+    await loadModels();
+
+    // Automatically select the newly added model
+    modelSelector.value = newModel;
+    // Trigger the change event to update currentModelName and initialize chat
+    modelSelector.dispatchEvent(new Event("change"));
+  } catch (error) {
+    console.error("Error adding custom model:", error);
+    alert(`Failed to add model: ${error.message || error}`);
+  }
+});
+
+// Session Management Listeners
 deleteSessionButton.addEventListener("click", async () => {
   const sessionIdToDelete = parseInt(sessionSelector.value, 10);
   if (!isNaN(sessionIdToDelete)) {
@@ -786,10 +1004,35 @@ async function fileToGenerativePart(file) {
 // --- Sending Message ---
 
 async function sendMessage() {
-  if (!apiKey || !chat) {
-    addMessage("model", [
-      { text: "Error: API Key not configured or initialization failed." },
-    ]);
+  // Use the globally managed 'chat' object, which is initialized/updated based on model selection
+  if (!apiKey || !genAI) {
+    addMessage(
+      "model",
+      [{ text: "Error: API Key not configured or GenAI not initialized." }],
+      false
+    );
+    return;
+  }
+  if (!chat) {
+    addMessage(
+      "model",
+      [
+        {
+          text: `Error: Chat not initialized for model ${
+            currentModelName || "N/A"
+          }. Please select a valid model and ensure API key is correct.`,
+        },
+      ],
+      false
+    );
+    return;
+  }
+  if (!currentSessionId) {
+    addMessage(
+      "model",
+      [{ text: "Error: No active chat session selected." }],
+      false
+    );
     return;
   }
 
