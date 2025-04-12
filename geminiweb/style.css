@@ -77,12 +77,69 @@ body {
   background-color: #dcf8c6;
   align-self: flex-end;
   margin-left: auto; /* Push user messages to the right */
+  position: relative; /* Needed for absolute positioning of the copy button */
 }
 
 .model-message {
   background-color: #eee;
   align-self: flex-start;
   margin-right: auto; /* Push model messages to the left */
+  position: relative; /* Needed for absolute positioning of the copy button */
+}
+
+.copy-button {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  background-color: #aaa;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 0.8em;
+  cursor: pointer;
+  opacity: 0.7; /* Slightly transparent */
+  transition: opacity 0.2s, background-color 0.2s;
+}
+
+.copy-button:hover {
+  opacity: 1;
+  background-color: #888;
+}
+
+.copy-button:active {
+  background-color: #666;
+}
+
+/* Specific styles for the copy button inside code blocks */
+.copy-code-button {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  background-color: #555; /* Different color for distinction */
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 0.75em;
+  cursor: pointer;
+  opacity: 0; /* Hidden by default */
+  transition: opacity 0.2s;
+  z-index: 1; /* Ensure it's above code content */
+}
+
+/* Show button on hover of the pre block */
+.message-content pre:hover .copy-code-button {
+  opacity: 0.8;
+}
+
+.copy-code-button:hover {
+  opacity: 1;
+  background-color: #333;
+}
+
+.copy-code-button:active {
+  background-color: #000;
 }
 
 .message-content img,

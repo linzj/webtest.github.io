@@ -106,7 +106,43 @@ function addMessage(sender, contentParts) {
       } else {
         console.warn("KaTeX auto-render not loaded yet.");
       }
+
+      // Add copy buttons to code blocks *after* markdown is parsed and added to contentDiv
+      // This needs to happen *after* the main text processing for this part
+      contentDiv.querySelectorAll("pre").forEach((preElement) => {
+        // Avoid adding duplicate buttons if we process multiple text parts
+        if (preElement.querySelector(".copy-code-button")) return;
+
+        const codeCopyButton = document.createElement("button");
+        codeCopyButton.textContent = "Copy Code";
+        codeCopyButton.classList.add("copy-code-button"); // Use a different class
+
+        // Get text content, preferring the inner <code> if it exists
+        const codeElement = preElement.querySelector("code");
+        const codeToCopy = codeElement
+          ? codeElement.textContent
+          : preElement.textContent;
+
+        codeCopyButton.addEventListener("click", (e) => {
+          e.stopPropagation(); // Prevent triggering other click listeners if nested
+          navigator.clipboard
+            .writeText(codeToCopy)
+            .then(() => {
+              codeCopyButton.textContent = "Copied!";
+              setTimeout(() => {
+                codeCopyButton.textContent = "Copy Code";
+              }, 1500);
+            })
+            .catch((err) => {
+              console.error("Failed to copy code: ", err);
+            });
+        });
+        // Prepend button inside the <pre> tag for better positioning context
+        preElement.style.position = "relative"; // Ensure pre is a positioning context
+        preElement.insertBefore(codeCopyButton, preElement.firstChild);
+      });
     } else if (part.inlineData) {
+      // This should be at the same level as if (part.text)
       const mimeType = part.inlineData.mimeType;
       const data = part.inlineData.data;
       if (mimeType.startsWith("image/")) {
@@ -126,11 +162,37 @@ function addMessage(sender, contentParts) {
         `[File: ${part.fileData.mimeType}]`
       );
       contentDiv.appendChild(textNode);
-    }
-  });
+    } // End of the main part processing (text, inlineData, fileData)
+  }); // End of contentParts.forEach loop
 
-  messageDiv.appendChild(contentDiv);
-  chatHistory.appendChild(messageDiv);
+  // Add a general Copy Button for any message with text content (user or model)
+  // This copies the *original* full text content
+  if (contentParts.some((part) => part.text)) {
+    const copyButton = document.createElement("button");
+    copyButton.textContent = "Copy All";
+    copyButton.classList.add("copy-button"); // General copy button class
+    // Find the original text content to copy
+    const textToCopy = contentParts.find((part) => part.text)?.text || "";
+
+    copyButton.addEventListener("click", () => {
+      navigator.clipboard
+        .writeText(textToCopy)
+        .then(() => {
+          copyButton.textContent = "Copied All!";
+          setTimeout(() => {
+            copyButton.textContent = "Copy All";
+          }, 1500); // Reset after 1.5 seconds
+        })
+        .catch((err) => {
+          console.error("Failed to copy text: ", err);
+        });
+    });
+    // Append this general button to the main message div, not the content div
+    messageDiv.appendChild(copyButton);
+  }
+
+  messageDiv.appendChild(contentDiv); // Append the actual content
+  chatHistory.appendChild(messageDiv); // Append the message to history
   chatHistory.scrollTop = chatHistory.scrollHeight; // Scroll to bottom
 }
 
