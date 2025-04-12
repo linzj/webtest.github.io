@@ -84,6 +84,24 @@ body {
 #add-model-button:hover {
   background-color: #218838; /* Darker green */
 }
+
+/* Style for the checkbox container */
+.checkbox-container {
+  display: flex;
+  align-items: center; /* Vertically align label and checkbox */
+  margin-right: 15px; /* Add some space to the right */
+}
+
+.checkbox-container input[type="checkbox"] {
+  margin-right: 5px; /* Space between checkbox and label */
+  cursor: pointer;
+}
+
+.checkbox-container label {
+  margin: 0; /* Reset default label margins */
+  cursor: pointer;
+  font-size: 0.9em; /* Slightly smaller label */
+}
 /* --- End Model Management Styles --- */
 
 /* --- Session Management Styles --- */

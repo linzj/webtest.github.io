@@ -16,6 +16,7 @@ const deleteSessionButton = document.getElementById("delete-session-button");
 const modelSelector = document.getElementById("model-selector"); // Added
 const newModelNameInput = document.getElementById("new-model-name"); // Added
 const addModelButton = document.getElementById("add-model-button"); // Added
+const useGoogleSearchCheckbox = document.getElementById("use-google-search"); // Added for search tool
 
 let genAI;
 let chat; // Will be re-initialized when model changes
@@ -478,10 +479,35 @@ function initializeChatObject(modelName) {
   try {
     console.log(`Initializing chat with model: ${modelName}`);
     const model = genAI.getGenerativeModel({ model: modelName });
-    // Start a new chat session; history is managed by our DB, not the SDK's internal history
-    chat = model.startChat({
+
+    // --- Prepare StartChatParams ---
+    const startChatParams = {
       history: [], // Start fresh context for the SDK
-    });
+      tools: [], // Initialize empty tools array
+    };
+
+    // Check if Google Search should be enabled
+    if (useGoogleSearchCheckbox.checked) {
+      const googleSearchTool = {
+        googleSearchRetrieval: {}, // Empty object enables the tool with defaults
+        // You could add dynamicRetrievalConfig here if needed:
+        // googleSearchRetrieval: {
+        //     dynamicRetrievalConfig: {
+        //         mode: "MODE_DYNAMIC", // or "MODE_UNSPECIFIED"
+        //         dynamicThreshold: 0.5 // Optional threshold
+        //     }
+        // }
+      };
+      startChatParams.tools.push(googleSearchTool);
+      console.log("Google Search Retrieval tool enabled.");
+    } else {
+      console.log("Google Search Retrieval tool disabled.");
+    }
+    // --- End Prepare StartChatParams ---
+
+    // Start a new chat session with the prepared params
+    chat = model.startChat(startChatParams);
+
     console.log("Chat object initialized successfully for model:", modelName);
     return true;
   } catch (error) {
@@ -673,6 +699,28 @@ addModelButton.addEventListener("click", async () => {
   } catch (error) {
     console.error("Error adding custom model:", error);
     alert(`Failed to add model: ${error.message || error}`);
+  }
+});
+
+// Google Search Checkbox Listener (New)
+useGoogleSearchCheckbox.addEventListener("change", () => {
+  console.log("Google Search checkbox changed. Re-initializing chat object...");
+  if (currentModelName) {
+    if (!initializeChatObject(currentModelName)) {
+      alert(
+        `Failed to re-initialize chat with new Google Search setting for model: ${currentModelName}. Check console.`
+      );
+      // Optionally revert checkbox state or disable sending
+    } else {
+      keyStatus.textContent = `API Key loaded. Models loaded. Chat ready (${currentModelName}). Search: ${
+        useGoogleSearchCheckbox.checked ? "ON" : "OFF"
+      }`; // Update status
+      keyStatus.style.color = "green";
+    }
+  } else {
+    console.warn(
+      "Cannot re-initialize chat for Google Search toggle: No model selected."
+    );
   }
 });
 
