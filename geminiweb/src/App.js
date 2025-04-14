@@ -76,7 +76,7 @@ class App {
       if (!this.chatClient.initializeGenAI()) {
         // Error status already set by chatClient
         this.uiManager.showChatContainer(false); // Hide chat if client fails
-        this._setupEventListeners(); // Still setup key listener
+        this._setupEventListeners(); // Still setup key listener if client fails
         return; // Stop further initialization if GenAI client fails
       }
       this.uiManager.updateStatus(
@@ -116,14 +116,17 @@ class App {
         );
       }
 
-      // 6. Load Initial Chat History Display (requires session)
+      // 6. Setup Event Listeners (before loading history that needs them)
+      this._setupEventListeners();
+
+      // 7. Load Initial Chat History Display (requires session)
       if (initialSessionId) {
         await this.loadChatHistory(initialSessionId);
       } else {
         this.chatInterface.clearHistoryDisplay(); // Ensure it's clear if no session
       }
 
-      // 7. Initialize Chat Session (requires model and session)
+      // 8. Initialize Chat Session (requires model and session)
       if (initialModel && initialSessionId) {
         const chatReady = await this.chatClient.initializeChatSession(
           initialModel,
@@ -147,11 +150,11 @@ class App {
       // API Key not set
       this.uiManager.updateStatus("API Key not set.", "warning");
       this.uiManager.showChatContainer(false);
+      // Setup listeners even if key isn't set, so the save button works
+      this._setupEventListeners();
     }
 
-    // 8. Setup Event Listeners
-    this._setupEventListeners();
-
+    // 9. Final log
     console.log("App initialization complete.");
   }
 
@@ -160,23 +163,44 @@ class App {
    * @param {number} sessionId - The session ID to load history for.
    */
   async loadChatHistory(sessionId) {
-    this.chatInterface.clearHistoryDisplay();
-    if (!sessionId) return;
+    console.log(`[App] loadChatHistory called for session ${sessionId}`);
+    this.chatInterface.clearHistoryDisplay(); // Clear existing display first
+    if (!sessionId) {
+      console.log("[App] No session ID provided to loadChatHistory.");
+      return;
+    }
 
     try {
       const messages = await this.storageManager.getRawMessagesForSession(
         sessionId
       );
       console.log(
-        `Displaying ${messages.length} messages for session ${sessionId}.`
+        `[App] Displaying ${messages.length} messages for session ${sessionId}.`
+      );
+      // Log the order just before displaying to verify sorting
+      console.log(
+        "[App] Messages order before display:",
+        messages.map((m) => ({
+          id: m.id,
+          sender: m.sender,
+          timestamp: m.timestamp,
+        }))
       );
       messages.forEach((msg) => {
-        // Pass null for usageMetadata when loading from DB
-        this.chatInterface.addMessage(msg.sender, msg.contentParts, null);
+        // Pass message ID when loading from DB
+        this.chatInterface.addMessage(
+          msg.sender,
+          msg.contentParts,
+          null,
+          msg.id
+        );
       });
+      console.log(
+        `[App] Finished adding messages to display for session ${sessionId}.`
+      );
     } catch (error) {
       console.error(
-        `Error loading or displaying history for session ${sessionId}:`,
+        `[App] Error loading or displaying history for session ${sessionId}:`,
         error
       );
       this.chatInterface.addMessage("system", [
@@ -257,17 +281,25 @@ class App {
     this.uiManager.clearMessageInput();
     this.fileManager.clearAttachments();
 
-    // --- Display User Message & Save ---
-    this.chatInterface.addMessage("user", userDisplayParts);
+    // --- Save and Display User Message ---
+    let userMessageId = null;
     try {
-      // Save the message using the API parts (which are serializable)
-      await this.storageManager.saveMessage(
+      // Save the message first to get its ID
+      userMessageId = await this.storageManager.saveMessage(
         { sender: "user", contentParts: apiMessageParts },
         currentSessionId
       );
+      // Display user message *after* saving, passing the ID
+      this.chatInterface.addMessage(
+        "user",
+        userDisplayParts,
+        null,
+        userMessageId
+      );
     } catch (saveError) {
       console.error("Failed to save user message:", saveError);
-      // Optionally notify user, but proceed with sending
+      // Display user message even if save failed, but without an ID
+      this.chatInterface.addMessage("user", userDisplayParts);
     }
 
     // --- Send to API ---
@@ -295,17 +327,24 @@ class App {
 
       const usageInfo = response.usageMetadata; // Extract usage metadata
 
-      // Display model response
-      this.chatInterface.addMessage("model", responseParts, usageInfo);
-
-      // Save model response
+      // Save and Display model response
+      let modelMessageId = null;
       try {
-        await this.storageManager.saveMessage(
+        modelMessageId = await this.storageManager.saveMessage(
           { sender: "model", contentParts: responseParts },
           currentSessionId
         );
+        // Display model response *after* saving, passing the ID
+        this.chatInterface.addMessage(
+          "model",
+          responseParts,
+          usageInfo,
+          modelMessageId
+        );
       } catch (saveError) {
         console.error("Failed to save model response:", saveError);
+        // Display model response even if save failed, but without an ID
+        this.chatInterface.addMessage("model", responseParts, usageInfo);
       }
     } else if (result.error) {
       // Display error message from sending
@@ -370,6 +409,9 @@ class App {
 
     // Re-init Sessions (might not be necessary unless key affects session access)
     // await this.sessionManager.initialize(); // Optional: reload sessions
+
+    // Setup listeners *before* loading history
+    this._setupEventListeners();
 
     // Reload history display for current session
     if (currentSession) {
@@ -493,6 +535,141 @@ class App {
   }
 
   /**
+   * Handles the "Retry" button click on a model message.
+   * @param {number} modelMessageId - The ID of the model message to retry.
+   */
+  async handleRetry(modelMessageId) {
+    console.log(`[App] Handling retry for model message ID: ${modelMessageId}`);
+    this.uiManager.updateStatus("Retrying...", "info");
+
+    const currentSessionId = this.sessionManager.getCurrentSessionId();
+    const currentModelName = this.modelManager.getCurrentModel();
+    const useGoogleSearch = this.useGoogleSearchCheckbox?.checked ?? false;
+
+    if (!currentSessionId || !currentModelName) {
+      console.error("[App] Cannot retry: Missing session ID or model name.");
+      this.uiManager.updateStatus(
+        "Error: Cannot retry (missing session or model).",
+        "error"
+      );
+      return;
+    }
+
+    let loadingIndicator = null;
+
+    try {
+      // --- Preparation Phase ---
+      console.log("[App] Retry Step 1: Finding previous user message...");
+      const userMessageId = await this.storageManager.findPreviousUserMessage(
+        currentSessionId,
+        modelMessageId
+      );
+      if (!userMessageId) {
+        throw new Error("Could not find the preceding user message to retry.");
+      }
+      console.log(
+        `[App] Retry Step 1: Found user message ID: ${userMessageId}`
+      );
+
+      console.log("[App] Retry Step 2: Getting user message content...");
+      const userMessageParts = await this.storageManager.getMessageContent(
+        currentSessionId,
+        userMessageId
+      );
+      if (!userMessageParts) {
+        throw new Error(
+          "Could not retrieve the content of the user message to retry."
+        );
+      }
+
+      console.log("[App] Retry Step 3: Getting truncated history...");
+      const truncatedHistory = await this.storageManager.getHistoryUpToMessage(
+        currentSessionId,
+        userMessageId
+      );
+
+      // --- Execution Phase ---
+      console.log("[App] Retry Step 4: Adding loading indicator...");
+      loadingIndicator = this.chatInterface.addLoadingIndicator();
+
+      console.log("[App] Retry Step 5: Sending request to API...");
+      const result = await this.chatClient.sendMessageWithHistory(
+        currentModelName,
+        truncatedHistory,
+        userMessageParts,
+        useGoogleSearch
+      );
+
+      console.log("[App] Retry Step 6: Removing loading indicator...");
+      if (loadingIndicator) {
+        this.chatInterface.removeElement(loadingIndicator);
+        loadingIndicator = null;
+      }
+
+      console.log("[App] Retry Step 7: Handling API response...");
+      if (result.response) {
+        const response = result.response;
+        let responseText = "";
+        let responseParts = [];
+        try {
+          responseText = response.text();
+          responseParts.push({ text: responseText });
+        } catch (textError) {
+          console.error(
+            "[App] Error extracting text from retry response:",
+            textError
+          );
+          responseParts.push({ text: "[Error extracting text content]" });
+        }
+        // const usageInfo = response.usageMetadata; // Not needed for this approach
+
+        // --- Commit Phase (DB & UI) ---
+        console.log(
+          `[App] Retry Step 8: Updating message ${modelMessageId} content in DB...`
+        );
+        await this.storageManager.updateMessageContent(
+          modelMessageId,
+          responseParts
+        ); // Use update instead of delete/save
+        console.log(
+          `[App] Retry Step 8: Updated message ${modelMessageId} content.`
+        );
+
+        // 9. Re-initialize the main chat client *before* reloading UI
+        console.log("[App] Retry Step 9: Re-initializing chat client state...");
+        await this.chatClient.reInitializeChatSession(currentSessionId);
+        console.log("[App] Retry Step 9: Chat client re-initialized");
+
+        // 10. Visually replace by reloading the entire history display
+        console.log("[App] Retry Step 10: Reloading chat history display...");
+        await this.loadChatHistory(currentSessionId); // Reload UI from DB
+        console.log("[App] Retry Step 10: Chat history display reloaded");
+        // --- End Commit Phase ---
+
+        this.uiManager.updateStatus("Retry successful.", "success");
+      } else {
+        // API call failed
+        throw new Error(result.error || "Unknown error during retry API call.");
+      }
+    } catch (error) {
+      // --- Error Handling ---
+      console.error("[App] Error during retry process:", error);
+      this.uiManager.updateStatus(`Retry failed: ${error.message}`, "error");
+
+      // Ensure loading indicator is removed if it exists
+      if (loadingIndicator) {
+        this.chatInterface.removeElement(loadingIndicator);
+      }
+
+      // Reload history to ensure UI consistency after any failure
+      console.warn(
+        "[App] Retry failed, reloading history to ensure UI consistency."
+      );
+      await this.loadChatHistory(currentSessionId);
+    }
+  }
+
+  /**
    * Sets up the main application event listeners.
    * @private
    */
@@ -538,6 +715,11 @@ class App {
     );
     this.sessionManager.setOnSessionChange((newSessionId, isNew) =>
       this.handleSessionChange(newSessionId, isNew)
+    );
+
+    // Retry Callback
+    this.chatInterface.setOnRetryCallback((messageId) =>
+      this.handleRetry(messageId)
     );
 
     // Download PNG Button
