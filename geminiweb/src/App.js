@@ -491,12 +491,10 @@ document.addEventListener("DOMContentLoaded", () => {
   app.initialize().catch((error) => {
     console.error("Unhandled error during app initialization:", error);
     // Display a critical error message to the user if necessary
-    const statusElement = document.getElementById("key-status");
-    if (statusElement) {
-      statusElement.textContent =
-        "Critical Error: App failed to initialize. Check console.";
-      statusElement.style.color = "red";
-    }
+    app.uiManager.updateStatus(
+      "Critical Error: App failed to initialize. Check console.",
+      "error"
+    );
   });
   // Make app instance globally accessible for debugging (optional)
   // window.geminiApp = app;

@@ -48,6 +48,15 @@ export class UIManager {
   }
 
   /**
+   * Adds an event listener to the document.
+   * @param {string} eventType - The type of event to listen for (e.g., 'DOMContentLoaded', 'click').
+   * @param {Function} listener - The function to call when the event occurs.
+   */
+  addDocumentEventListener(eventType, listener) {
+    document.addEventListener(eventType, listener);
+  }
+
+  /**
    * Updates the status message displayed to the user.
    * @param {string} text - The message text.
    * @param {'info' | 'success' | 'warning' | 'error'} type - The type of message (affects styling).
@@ -75,6 +84,119 @@ export class UIManager {
         statusElement.style.color = "black"; // Or inherit
         break;
     }
+  }
+
+  /**
+   * Creates a div element for a chat message.
+   * @param {number | null} messageId - The database ID of the message.
+   * @param {'user' | 'model' | 'system'} sender - The sender type.
+   * @returns {HTMLDivElement} The created message div.
+   */
+  createMessageDiv(messageId, sender) {
+    const messageDiv = document.createElement("div");
+    messageDiv.dataset.messageId = messageId;
+    messageDiv.classList.add("message", `${sender}-message`);
+    return messageDiv;
+  }
+
+  /**
+   * Creates a div element for message content.
+   * @returns {HTMLDivElement} The created content div.
+   */
+  createContentDiv() {
+    const contentDiv = document.createElement("div");
+    contentDiv.classList.add("message-content");
+    return contentDiv;
+  }
+
+  /**
+   * Creates a temporary div element.
+   * @returns {HTMLDivElement} The created temporary div.
+   */
+  createTempDiv() {
+    return document.createElement("div");
+  }
+
+  /**
+   * Creates an image element.
+   * @param {string} src - The image source URL.
+   * @param {string} alt - The alt text for the image.
+   * @returns {HTMLImageElement} The created image element.
+   */
+  createImageElement(src, alt) {
+    const img = document.createElement("img");
+    img.src = src;
+    img.alt = alt;
+    return img;
+  }
+
+  /**
+   * Creates a video element.
+   * @param {string} src - The video source URL.
+   * @returns {HTMLVideoElement} The created video element.
+   */
+  createVideoElement(src) {
+    const video = document.createElement("video");
+    video.src = src;
+    video.controls = true;
+    video.muted = true;
+    return video;
+  }
+
+  /**
+   * Creates a span element for a file reference.
+   * @param {string} text - The text content for the span.
+   * @returns {HTMLSpanElement} The created span element.
+   */
+  createFileReferenceSpan(text) {
+    const span = document.createElement("span");
+    span.textContent = text;
+    return span;
+  }
+
+  /**
+   * Creates a copy button element.
+   * @param {string} text - The text content for the button.
+   * @param {string} title - The title attribute for the button.
+   * @param {string} className - The class name for the button.
+   * @returns {HTMLButtonElement} The created button element.
+   */
+  createCopyButton(text, title, className) {
+    const button = document.createElement("button");
+    button.textContent = text;
+    button.title = title;
+    button.classList.add(className);
+    return button;
+  }
+
+  /**
+   * Creates a retry button element.
+   * @param {number} messageId - The message ID to associate with the button.
+   * @returns {HTMLButtonElement} The created retry button.
+   */
+  createRetryButton(messageId) {
+    const retryButton = document.createElement("button");
+    retryButton.textContent = "Retry";
+    retryButton.classList.add("retry-button");
+    retryButton.title = "Retry generating this response";
+    retryButton.dataset.messageId = messageId;
+    return retryButton;
+  }
+
+  /**
+   * Creates a div element for token usage information.
+   * @param {object} usageMetadata - The usage metadata object.
+   * @returns {HTMLDivElement} The created token info div.
+   */
+  createTokenInfoDiv(usageMetadata) {
+    const tokenInfoDiv = document.createElement("div");
+    tokenInfoDiv.classList.add("token-usage-info");
+    const promptTokens = usageMetadata.promptTokenCount ?? "N/A";
+    const responseTokens = usageMetadata.candidatesTokenCount ?? "N/A";
+    const totalTokens = usageMetadata.totalTokenCount ?? "N/A";
+    tokenInfoDiv.textContent = `Tokens: ${totalTokens} (Prompt: ${promptTokens}, Response: ${responseTokens})`;
+    tokenInfoDiv.title = `Prompt Tokens: ${promptTokens}\nResponse Tokens: ${responseTokens}`;
+    return tokenInfoDiv;
   }
 
   /**

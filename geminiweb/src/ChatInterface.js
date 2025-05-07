@@ -27,15 +27,9 @@ export class ChatInterface {
   addMessage(sender, contentParts, usageMetadata = null, messageId = null) {
     if (!this.chatHistoryElement) return;
 
-    const messageDiv = document.createElement("div");
-    messageDiv.dataset.messageId = messageId; // Store ID on the element
-    messageDiv.classList.add(
-      "message",
-      `${sender}-message` // e.g., user-message, model-message
-    );
+    const messageDiv = this.uiManager.createMessageDiv(messageId, sender);
 
-    const contentDiv = document.createElement("div");
-    contentDiv.classList.add("message-content");
+    const contentDiv = this.uiManager.createContentDiv();
 
     let hasTextContent = false;
     let fullTextMessage = ""; // Accumulate text for the main copy button
@@ -52,7 +46,7 @@ export class ChatInterface {
           : this._escapeHtml(part.text);
 
         // 2. Append HTML to a temporary container
-        const tempDiv = document.createElement("div");
+        const tempDiv = this.uiManager.createTempDiv();
         tempDiv.innerHTML = markdownHtml;
 
         // 3. Render KaTeX within the temporary container
@@ -94,14 +88,14 @@ export class ChatInterface {
         let mediaElement;
 
         if (mimeType.startsWith("image/")) {
-          mediaElement = document.createElement("img");
-          mediaElement.src = `data:${mimeType};base64,${data}`;
-          mediaElement.alt = "User image"; // Consider adding filename if available
+          mediaElement = this.uiManager.createImageElement(
+            `data:${mimeType};base64,${data}`,
+            "User image"
+          );
         } else if (mimeType.startsWith("video/")) {
-          mediaElement = document.createElement("video");
-          mediaElement.src = `data:${mimeType};base64,${data}`;
-          mediaElement.controls = true;
-          mediaElement.muted = true;
+          mediaElement = this.uiManager.createVideoElement(
+            `data:${mimeType};base64,${data}`
+          );
         }
 
         if (mediaElement) {
@@ -109,7 +103,7 @@ export class ChatInterface {
         }
       } else if (part.fileData) {
         // Basic display for fileData (less common for direct display)
-        const textNode = document.createTextNode(
+        const textNode = this.uiManager.createFileReferenceSpan(
           `[File Reference: ${part.fileData.mimeType}]`
         );
         contentDiv.appendChild(textNode);
@@ -144,12 +138,8 @@ export class ChatInterface {
    */
   addLoadingIndicator() {
     if (!this.chatHistoryElement) return null;
-    const loadingMessageDiv = document.createElement("div");
-    loadingMessageDiv.classList.add(
-      "message",
-      "model-message",
-      "loading-indicator"
-    ); // Add specific class
+    const loadingMessageDiv = this.uiManager.createMessageDiv(null, "model"); // Use createMessageDiv
+    loadingMessageDiv.classList.add("loading-indicator"); // Add specific class
     loadingMessageDiv.textContent = "Generating response...";
     this.chatHistoryElement.appendChild(loadingMessageDiv);
     this.uiManager.scrollToChatBottom();
@@ -186,10 +176,11 @@ export class ChatInterface {
     // Avoid adding duplicate buttons
     if (preElement.querySelector(".copy-code-button")) return;
 
-    const codeCopyButton = document.createElement("button");
-    codeCopyButton.textContent = "Copy Code";
-    codeCopyButton.classList.add("copy-code-button");
-    codeCopyButton.title = "Copy code block";
+    const codeCopyButton = this.uiManager.createCopyButton(
+      "Copy Code",
+      "Copy code block",
+      "copy-code-button"
+    );
 
     // Get text content, preferring the inner <code> if it exists
     const codeElement = preElement.querySelector("code");
@@ -229,10 +220,11 @@ export class ChatInterface {
    * @private
    */
   _addGeneralCopyButton(messageDiv, textToCopy) {
-    const copyButton = document.createElement("button");
-    copyButton.textContent = "Copy All";
-    copyButton.classList.add("copy-button"); // General copy button class
-    copyButton.title = "Copy entire message text";
+    const copyButton = this.uiManager.createCopyButton(
+      "Copy All",
+      "Copy entire message text",
+      "copy-button"
+    );
 
     copyButton.addEventListener("click", () => {
       navigator.clipboard
@@ -264,14 +256,7 @@ export class ChatInterface {
   _addTokenUsageInfo(messageDiv, usageMetadata) {
     if (!usageMetadata || usageMetadata.totalTokenCount === undefined) return;
 
-    const tokenInfoDiv = document.createElement("div");
-    tokenInfoDiv.classList.add("token-usage-info");
-
-    const promptTokens = usageMetadata.promptTokenCount ?? "N/A";
-    const responseTokens = usageMetadata.candidatesTokenCount ?? "N/A";
-    const totalTokens = usageMetadata.totalTokenCount ?? "N/A";
-    tokenInfoDiv.textContent = `Tokens: ${totalTokens} (Prompt: ${promptTokens}, Response: ${responseTokens})`;
-    tokenInfoDiv.title = `Prompt Tokens: ${promptTokens}\nResponse Tokens: ${responseTokens}`;
+    const tokenInfoDiv = this.uiManager.createTokenInfoDiv(usageMetadata);
 
     messageDiv.appendChild(tokenInfoDiv);
   }
@@ -283,7 +268,7 @@ export class ChatInterface {
    * @private
    */
   _escapeHtml(text) {
-    const div = document.createElement("div");
+    const div = this.uiManager.createTempDiv(); // Use createTempDiv for a generic div
     div.textContent = text;
     return div.innerHTML;
   }
@@ -297,11 +282,7 @@ export class ChatInterface {
   _addRetryButton(messageDiv, messageId) {
     if (!messageId || !this.onRetryCallback) return; // Only add if ID and callback exist
 
-    const retryButton = document.createElement("button");
-    retryButton.textContent = "Retry";
-    retryButton.classList.add("retry-button");
-    retryButton.title = "Retry generating this response";
-    retryButton.dataset.messageId = messageId; // Store ID on the button itself too
+    const retryButton = this.uiManager.createRetryButton(messageId);
 
     retryButton.addEventListener("click", (event) => {
       event.stopPropagation();
@@ -351,12 +332,9 @@ export class ChatInterface {
     if (!this.chatHistoryElement) return null;
 
     // --- Create the message element (similar to addMessage) ---
-    const messageDiv = document.createElement("div");
-    messageDiv.dataset.messageId = messageId;
-    messageDiv.classList.add("message", `${sender}-message`);
+    const messageDiv = this.uiManager.createMessageDiv(messageId, sender);
 
-    const contentDiv = document.createElement("div");
-    contentDiv.classList.add("message-content");
+    const contentDiv = this.uiManager.createContentDiv();
 
     let hasTextContent = false;
     let fullTextMessage = "";
@@ -368,7 +346,7 @@ export class ChatInterface {
         const markdownHtml = window.marked
           ? marked.parse(part.text, { breaks: true })
           : this._escapeHtml(part.text);
-        const tempDiv = document.createElement("div");
+        const tempDiv = this.uiManager.createTempDiv();
         tempDiv.innerHTML = markdownHtml;
         try {
           if (window.renderMathInElement) {
@@ -390,20 +368,20 @@ export class ChatInterface {
         const data = part.inlineData.data;
         let mediaElement;
         if (mimeType.startsWith("image/")) {
-          mediaElement = document.createElement("img");
-          mediaElement.src = `data:${mimeType};base64,${data}`;
-          mediaElement.alt = "User image";
+          mediaElement = this.uiManager.createImageElement(
+            `data:${mimeType};base64,${data}`,
+            "User image"
+          );
         } else if (mimeType.startsWith("video/")) {
-          mediaElement = document.createElement("video");
-          mediaElement.src = `data:${mimeType};base64,${data}`;
-          mediaElement.controls = true;
-          mediaElement.muted = true;
+          mediaElement = this.uiManager.createVideoElement(
+            `data:${mimeType};base64,${data}`
+          );
         }
         if (mediaElement) {
           contentDiv.appendChild(mediaElement);
         }
       } else if (part.fileData) {
-        const textNode = document.createTextNode(
+        const textNode = this.uiManager.createFileReferenceSpan(
           `[File Reference: ${part.fileData.mimeType}]`
         );
         contentDiv.appendChild(textNode);
