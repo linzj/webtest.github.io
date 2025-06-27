@@ -8925,6 +8925,7 @@ class SampleManager {
   }
   constructor() {
     this.samples = [];
+    this.originalSamples = null;
     this.currentIndex = 0;
     this.finalized = false;
     this.state = "receiving";
@@ -8948,11 +8949,13 @@ class SampleManager {
     await this.readyPromise;
   }
   finalize() {
+    this.originalSamples = this.samples;
     this.resolveReadyPromise();
     this.resolveReadyPromise = null;
     this.state = "finalized";
   }
   finalizeTimeRange(timeRangeStart, timeRangeEnd) {
+    this.samples = this.originalSamples;
     let startIndex = 0;
     let endIndex = this.samples.length;
     let preciousStartIndex = 0;
@@ -8986,6 +8989,7 @@ class SampleManager {
     return [this.samples.length, outputTimeRangeStart, outputTimeRangeEnd];
   }
   finalizeSampleInIndex(startIndex, endIndex) {
+    this.samples = this.originalSamples;
     let preciousStartIndex = startIndex;
     while (startIndex > 0 && !this.samples[startIndex].is_sync) {
       startIndex--;
@@ -9039,7 +9043,6 @@ class SampleManager {
     while (processed < count && this.currentIndex < this.samples.length) {
       const sample = this.samples[this.currentIndex];
       onChunk(SampleManager.encodedVideoChunkFromSample(sample));
-      sample.data = null;
       this.currentIndex++;
       processed++;
     }
@@ -9062,6 +9065,11 @@ class SampleManager {
   reset() {
     this.currentIndex = 0;
     this.samples = [];
+    this.originalSamples = null;
+    this.currentIndex = 0;
+    this.finalized = false;
+  }
+  resetForReprocessing() {
     this.currentIndex = 0;
     this.finalized = false;
   }
@@ -9801,11 +9809,23 @@ class VideoProcessor {
   }
 
   /**
+   * Resets the processor state to 'initialized' if it has been finalized.
+   * This allows for reprocessing of the video with different settings.
+   */
+  resetForReprocessing() {
+    if (this.state === "finalized") {
+      this.state = "initialized";
+      this.sampleManager.resetForReprocessing();
+    }
+  }
+
+  /**
    * Processes the initialized file with current configuration
    * @returns {Promise<void>}
    * @throws {Error} If processor is not in initialized state
    */
   async processFile() {
+    this.resetForReprocessing();
     if (this.state !== "initialized") {
       throw new Error("Processor is not initializing");
     }
@@ -10054,6 +10074,7 @@ class VideoProcessor {
    * @throws {Error} If processor is not in initialized state
    */
   async renderSampleInPercentage(percentage) {
+    this.resetForReprocessing();
     if (this.state !== "initialized") {
       throw new Error("Processor should be in the initialized state");
     }
