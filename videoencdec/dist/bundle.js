@@ -9626,6 +9626,7 @@ class VideoFrameRenderer {
     this.width = 0;
     this.height = 0;
     this.scale = 1.0;
+    this.rotation = 0; // Video rotation in degrees
   }
   setup(width, height, matrix, scale = 1.0) {
     this.width = width;
@@ -9633,33 +9634,40 @@ class VideoFrameRenderer {
     this.matrix = matrix;
     this.scale = scale;
   }
+
+  /**
+   * Updates the rotation of the video frame.
+   * @param {number} rotation - The new rotation in degrees.
+   */
+  updateRotation(rotation) {
+    this.rotation = rotation;
+  }
+
+  /**
+   * Draws a video frame to the canvas, applying scaling and rotation.
+   * @param {VideoFrame} frame - The video frame to draw.
+   */
   drawFrame(frame) {
     this.ctx.save();
+    const canvasWidth = this.ctx.canvas.width;
+    const canvasHeight = this.ctx.canvas.height;
 
-    // Calculate scaled dimensions (round up to 64)
-    const scaledWidth = Math.ceil(this.width * this.scale / 64) * 64;
-    const scaledHeight = Math.ceil(this.height * this.scale / 64) * 64;
+    // Translate to the center of the canvas to rotate around the center
+    this.ctx.translate(canvasWidth / 2, canvasHeight / 2);
+    this.ctx.rotate(this.rotation * Math.PI / 180);
 
-    // Calculate offsets to center the frame
-    const offsetX = (this.width - scaledWidth) / 2;
-    const offsetY = (this.height - scaledHeight) / 2;
-    if (this.matrix) {
-      const scale = 1 / 65536;
-      const [a, b, u, c, d, v, x, y, w] = this.matrix.map(val => val * scale);
-      if (a === -1 && d === -1) {
-        this.ctx.translate(scaledWidth, scaledHeight);
-        this.ctx.rotate(Math.PI);
-      } else if (a === 0 && b === 1 && c === -1 && d === 0) {
-        this.ctx.translate(scaledWidth, 0);
-        this.ctx.rotate(Math.PI / 2);
-      } else if (a === 0 && b === -1 && c === 1 && d === 0) {
-        this.ctx.translate(0, scaledHeight);
-        this.ctx.rotate(-Math.PI / 2);
-      }
-    }
+    // Calculate the crop dimensions based on the scale
+    const cropWidth = this.width * this.scale;
+    const cropHeight = this.height * this.scale;
+    const cropX = (this.width - cropWidth) / 2;
+    const cropY = (this.height - cropHeight) / 2;
 
-    // Draw the frame with scaling and centering
-    this.ctx.drawImage(frame, -offsetX, -offsetY, this.width, this.height);
+    // Draw the frame, cropped and scaled, centered on the canvas
+    this.ctx.drawImage(frame, cropX, cropY, cropWidth, cropHeight, -cropWidth / 2,
+    // Draw at the center of the rotated canvas
+    -cropHeight / 2,
+    // Draw at the center of the rotated canvas
+    cropWidth, cropHeight);
     this.ctx.restore();
   }
 }
@@ -9738,19 +9746,59 @@ class VideoProcessor {
     this.previewManager = null; // Will hold PreviewManager instance
     this.lastPreviewPercentage = 0.0;
     this.scale = 1.0; // Add scale property
+    this.rotation = 0; // Add rotation property
     this.fps = 0;
     this.videoWidth = 0;
     this.videoHeight = 0;
     this.matrix = undefined;
   }
 
-  // Add update method for scale
+  /**
+   * Sets the initial rotation of the video based on the video's matrix.
+   * @param {number[]} matrix - The video's transformation matrix.
+   */
+  setInitialRotation(matrix) {
+    if (!matrix) return;
+    const scale = 1 / 65536;
+    const [a, b, u, c, d, v, x, y, w] = matrix.map(val => val * scale);
+    let rotation = 0;
+    if (a === 0 && b === 1 && c === -1 && d === 0) {
+      rotation = 90;
+    } else if (a === 0 && b === -1 && c === 1 && d === 0) {
+      rotation = -90;
+    } else if (a === -1 && d === -1) {
+      rotation = 180;
+    }
+    this.updateRotation(rotation);
+  }
+
+  /**
+   * Updates the rotation of the video.
+   * @param {number} rotation - The new rotation in degrees.
+   */
+  async updateRotation(rotation) {
+    this.rotation = rotation;
+    this.frameRenderer.updateRotation(this.rotation);
+    const {
+      width,
+      height
+    } = this.getCanvasDimensions();
+    this.setupCanvas(width, height);
+    if (this.state === "initialized") {
+      await this.renderSampleInPercentage(this.lastPreviewPercentage);
+    }
+  }
+
+  /**
+   * Updates the scale of the video.
+   * @param {number} scale - The new scale value.
+   */
   async updateScale(scale) {
     this.scale = scale;
     const {
       width,
       height
-    } = this.getEncoderDimensions();
+    } = this.getCanvasDimensions();
     this.setupCanvas(width, height);
     // Update frame renderer
     this.frameRenderer.setup(this.videoWidth, this.videoHeight, this.matrix, scale);
@@ -9943,11 +9991,16 @@ class VideoProcessor {
       this.isChromeBased = true;
     }
     await this.setupDecoder(config);
-    this.setupCanvas(config.codedWidth, config.codedHeight);
     this.videoWidth = config.codedWidth;
     this.videoHeight = config.codedHeight;
-    this.fps = config.fps;
     this.matrix = config.matrix;
+    this.setInitialRotation(this.matrix);
+    const {
+      width,
+      height
+    } = this.getCanvasDimensions();
+    this.setupCanvas(width, height);
+    this.fps = config.fps;
     this.frameRenderer.setup(config.codedWidth, config.codedHeight, config.matrix, this.scale);
     this.mp4StartTime = config.startTime;
     this.frame_count = 0;
@@ -9974,10 +10027,19 @@ class VideoProcessor {
     this.canvas.width = width;
     this.canvas.height = height;
   }
+  getCanvasDimensions() {
+    const isSideways = this.rotation % 180 !== 0;
+    const width = isSideways ? this.videoHeight * this.scale : this.videoWidth * this.scale;
+    const height = isSideways ? this.videoWidth * this.scale : this.videoHeight * this.scale;
+    return {
+      width,
+      height
+    };
+  }
   getEncoderDimensions() {
-    // Round up dimensions to multiples of 64
-    const width = Math.ceil(this.videoWidth * this.scale / 64) * 64;
-    const height = Math.ceil(this.videoHeight * this.scale / 64) * 64;
+    const isSideways = this.rotation % 180 !== 0;
+    const width = Math.ceil((isSideways ? this.videoHeight : this.videoWidth) * this.scale / 64) * 64;
+    const height = Math.ceil((isSideways ? this.videoWidth : this.videoHeight) * this.scale / 64) * 64;
     return {
       width,
       height
@@ -12196,6 +12258,20 @@ document.getElementById("scaleSlider").addEventListener("input", async e => {
   document.getElementById("scaleValue").textContent = `${e.target.value}%`;
   if (processor && processor.state === "initialized") {
     await processor.updateScale(scale);
+  }
+});
+
+// Event listener for clockwise rotation button
+document.getElementById("rotateCW").addEventListener("click", async () => {
+  if (processor) {
+    await processor.updateRotation((processor.rotation + 90) % 360);
+  }
+});
+
+// Event listener for counter-clockwise rotation button
+document.getElementById("rotateCCW").addEventListener("click", async () => {
+  if (processor) {
+    await processor.updateRotation((processor.rotation - 90 + 360) % 360);
   }
 });
 })();

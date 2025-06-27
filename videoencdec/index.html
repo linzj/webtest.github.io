@@ -22,11 +22,13 @@
 
         .time-inputs {
             margin: 20px 0;
-            display: none;  /* Changed: hidden by default */
+            display: none;
+            /* Changed: hidden by default */
         }
 
         .time-inputs.visible {
-            display: block;  /* Added: show when visible class is present */
+            display: block;
+            /* Added: show when visible class is present */
         }
 
         .time-inputs input {
@@ -131,7 +133,7 @@
             <input type="radio" name="timeSelection" value="slider"> Frame Slider
         </label>
     </div>
-    
+
     <div class="time-inputs visible"> <!-- Added visible class since manual is checked by default -->
         <label>Start Time: <input type="text" id="startTime" value="00:00" pattern="[0-9]{2}:[0-9]{2}"></label>
         <label>End Time: <input type="text" id="endTime" value="00:00" pattern="[0-9]{2}:[0-9]{2}"></label>
@@ -161,6 +163,12 @@
         <div class="scale-control" style="margin-top: 10px;">
             <label>Scale: <span id="scaleValue">100%</span></label>
             <input type="range" id="scaleSlider" min="10" max="100" value="100" style="width: 200px;">
+        </div>
+        <!-- Rotation controls -->
+        <div class="rotation-control" style="margin-top: 10px;">
+            <label>Rotation:</label>
+            <button id="rotateCW">CW</button>
+            <button id="rotateCCW">CCW</button>
         </div>
     </div>
 
