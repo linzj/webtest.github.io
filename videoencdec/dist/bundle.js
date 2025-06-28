@@ -8946,6 +8946,251 @@ class PreviewManager {
 
 /***/ }),
 
+/***/ "./processingPipeline.js":
+/*!*******************************!*\
+  !*** ./processingPipeline.js ***!
+  \*******************************/
+/***/ ((__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) => {
+
+"use strict";
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   ProcessingPipeline: () => (/* binding */ ProcessingPipeline)
+/* harmony export */ });
+/* harmony import */ var _logging_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./logging.js */ "./logging.js");
+/* harmony import */ var _videoEncoder_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ./videoEncoder.js */ "./videoEncoder.js");
+/* harmony import */ var _videoDecoder_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ./videoDecoder.js */ "./videoDecoder.js");
+
+
+
+
+/**
+ * ProcessingPipeline manages the core video processing flow from decoding through encoding.
+ */
+class ProcessingPipeline {
+  /**
+   * Creates a new ProcessingPipeline instance.
+   * @param {Object} options - The options for the pipeline.
+   * @param {Function} options.onFrameProcessed - Callback executed for each processed frame.
+   * @param {Function} options.onFinalized - Callback executed when processing is complete.
+   * @param {SampleManager} options.sampleManager - The manager for video samples.
+   * @param {UIManager} options.uiManager - The manager for UI updates.
+   * @param {boolean} options.isChromeBased - Flag for browser type.
+   * @param {number} options.fps - The frames per second of the video.
+   */
+  constructor({
+    onFrameProcessed,
+    onFinalized,
+    sampleManager,
+    uiManager,
+    isChromeBased,
+    fps
+  }) {
+    this.onFrameProcessed = onFrameProcessed;
+    this.onFinalized = onFinalized;
+    this.sampleManager = sampleManager;
+    this.uiManager = uiManager;
+    this.isChromeBased = isChromeBased;
+    this.fps = fps;
+    this.decoder = null;
+    this.encoder = null;
+    this.state = "idle"; // 'idle', 'ready', 'processing', 'exhausted', 'finalized'
+    this.outputTaskPromises = [];
+    this.previousPromise = Promise.resolve();
+    this.timeRangeStart = 0;
+    this.timeRangeEnd = 0;
+  }
+
+  /**
+   * Sets up the decoder and encoder for the pipeline.
+   * @param {Object} config - The video configuration object from the demuxer.
+   */
+  async setup(config) {
+    await this.setupDecoder(config);
+    await this.setupEncoder();
+    this.state = "ready";
+  }
+
+  /**
+   * Sets up the video decoder.
+   * @param {Object} config - The video configuration object from the demuxer.
+   * @private
+   */
+  async setupDecoder(config) {
+    this.decoder = new _videoDecoder_js__WEBPACK_IMPORTED_MODULE_2__.VideoDecoder({
+      onFrame: frame => this.handleDecoderOutput(frame),
+      onError: e => console.error(e),
+      onDequeue: n => this.dispatch(n),
+      isChromeBased: this.isChromeBased
+    });
+    await this.decoder.setup(config);
+    this.uiManager.setStatus("decode", "Decoder configured");
+  }
+
+  /**
+   * Sets up the video encoder.
+   * @private
+   */
+  async setupEncoder() {
+    this.encoder = new _videoEncoder_js__WEBPACK_IMPORTED_MODULE_1__.VideoEncoder();
+    const {
+      width,
+      height
+    } = this.getEncoderDimensions();
+    await this.encoder.init(width, height, this.fps, !this.isChromeBased, true);
+  }
+
+  /**
+   * Calculates the output dimensions for the encoder, accounting for rotation, zoom,
+   * and ensuring dimensions are a multiple of 64.
+   * @returns {{width: number, height: number}}
+   */
+  getEncoderDimensions() {
+    const {
+      rotation,
+      videoWidth,
+      videoHeight,
+      zoom
+    } = this.uiManager;
+    const isSideways = rotation % 180 !== 0;
+    const width = Math.ceil((isSideways ? videoHeight : videoWidth) * zoom / 64) * 64;
+    const height = Math.ceil((isSideways ? videoWidth : videoHeight) * zoom / 64) * 64;
+    return {
+      width,
+      height
+    };
+  }
+
+  /**
+   * Starts the video processing.
+   * @param {number} timeRangeStart - The start of the processing time range in ms.
+   * @param {number} timeRangeEnd - The end of the processing time range in ms.
+   */
+  start(timeRangeStart, timeRangeEnd) {
+    if (this.state !== "ready") {
+      throw new Error("Pipeline is not ready to start processing.");
+    }
+    this.timeRangeStart = timeRangeStart;
+    this.timeRangeEnd = timeRangeEnd;
+    this.state = "processing";
+    this.timerDispatch();
+    this.dispatch(_logging_js__WEBPACK_IMPORTED_MODULE_0__.kDecodeQueueSize);
+  }
+
+  /**
+   * Requests and decodes a specified number of video chunks.
+   * This method is called to feed the decoder with data from the SampleManager.
+   * When all samples are exhausted, it flushes the decoder and finalizes the pipeline.
+   * @param {number} n - The number of chunks to dispatch.
+   * @private
+   */
+  dispatch(n) {
+    if (this.state !== "processing") {
+      return;
+    }
+    (0,_logging_js__WEBPACK_IMPORTED_MODULE_0__.verboseLog)(`Dispatching ${n} chunks`);
+    this.sampleManager.requestChunks(n, chunk => {
+      this.decoder.decode(chunk);
+    }, async () => {
+      this.state = "exhausted";
+      await this.decoder.flush();
+      if (this.decoder.decodeQueueSize == 0) {
+        this.finalize();
+      }
+    });
+  }
+
+  /**
+   * A timer-based dispatch mechanism for non-Chrome browsers that do not
+   * support the `ondequeue` event on the VideoDecoder.
+   * @private
+   */
+  timerDispatch() {
+    if (this.state !== "processing") {
+      return;
+    }
+    if (this.isChromeBased) {
+      return;
+    }
+    this.decoder.startTimerDispatch(n => {
+      if (n > 0) {
+        this.dispatch(n);
+      }
+      this.timerDispatch();
+    });
+  }
+
+  /**
+   * Handles decoded frames from the video decoder.
+   * It ensures that frames are processed sequentially and adds them to a processing queue.
+   * @param {VideoFrame} frame - The decoded video frame.
+   * @private
+   */
+  async handleDecoderOutput(frame) {
+    if (this.state === "processing" || this.state === "exhausted") {
+      const p = this.previousPromise.then(() => this.processFrame(frame));
+      this.previousPromise = p;
+      this.outputTaskPromises.push(p);
+      return;
+    }
+    // In any other state, we just close the frame.
+    // Preview frames are handled by the VideoProcessor, not this pipeline.
+    frame.close();
+  }
+
+  /**
+   * Processes a single video frame. This includes:
+   * - Checking if the frame is within the selected time range.
+   * - Drawing the frame to the canvas (with transformations).
+   * - Drawing a timestamp overlay.
+   * - Creating a new frame from the canvas.
+   * - Encoding the new frame.
+   * @param {VideoFrame} frame - The video frame to process.
+   * @private
+   */
+  async processFrame(frame) {
+    const frameTimeMs = Math.floor(frame.timestamp / 1000);
+    if (frameTimeMs < this.timeRangeStart || frameTimeMs > this.timeRangeEnd) {
+      frame.close();
+      return;
+    }
+    try {
+      this.uiManager.drawFrame(frame);
+      this.uiManager.drawTimestamp(frameTimeMs);
+      const videoFrameOptions = {
+        timestamp: frame.timestamp,
+        duration: frame.duration
+      };
+      frame.close();
+      (0,_logging_js__WEBPACK_IMPORTED_MODULE_0__.verboseLog)(`videoFrameOptions: ${JSON.stringify(videoFrameOptions)}`);
+      const newFrame = new VideoFrame(this.uiManager.canvas, videoFrameOptions);
+      this.onFrameProcessed();
+      return this.encoder.encode(newFrame);
+    } catch (error) {
+      console.error("Error processing frame:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Finalizes the processing pipeline.
+   * It waits for all pending frame processing tasks to complete,
+   * finalizes the encoder, and calls the onFinalized callback.
+   */
+  async finalize() {
+    if (this.state === "finalized") return;
+    if (this.outputTaskPromises.length > 0) {
+      await Promise.all(this.outputTaskPromises);
+      this.outputTaskPromises = [];
+    }
+    this.state = "finalized";
+    await this.encoder.finalize();
+    this.onFinalized();
+  }
+}
+
+/***/ }),
+
 /***/ "./sampleManager.js":
 /*!**************************!*\
   !*** ./sampleManager.js ***!
@@ -9444,6 +9689,181 @@ class TimeStampRenderer {
 
 /***/ }),
 
+/***/ "./uiManager.js":
+/*!**********************!*\
+  !*** ./uiManager.js ***!
+  \**********************/
+/***/ ((__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) => {
+
+"use strict";
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   UIManager: () => (/* binding */ UIManager)
+/* harmony export */ });
+/* harmony import */ var _videoFrameRenderer_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./videoFrameRenderer.js */ "./videoFrameRenderer.js");
+/* harmony import */ var _timeStampRenderer_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ./timeStampRenderer.js */ "./timeStampRenderer.js");
+
+
+
+/**
+ * UIManager handles all interactions with the DOM, including canvas rendering and status updates.
+ */
+class UIManager {
+  /**
+   * Creates a new UIManager instance.
+   * @param {Object} config - Configuration object.
+   * @param {HTMLCanvasElement} config.canvas - Canvas element for frame rendering.
+   * @param {HTMLElement} config.statusElement - Element to display processing status.
+   * @param {HTMLElement} config.frameCountDisplay - Element to display frame count.
+   * @param {Object} config.timestampProvider - Provider for timestamp operations.
+   */
+  constructor({
+    canvas,
+    statusElement,
+    frameCountDisplay,
+    timestampProvider
+  }) {
+    this.canvas = canvas;
+    this.ctx = this.canvas.getContext("2d");
+    this.statusElement = statusElement;
+    this.frameCountDisplay = frameCountDisplay;
+    this.timestampProvider = timestampProvider;
+    this.frameRenderer = new _videoFrameRenderer_js__WEBPACK_IMPORTED_MODULE_0__.VideoFrameRenderer(this.ctx);
+    this.timestampRenderer = null;
+    this.videoWidth = 0;
+    this.videoHeight = 0;
+    this.zoom = 1.0;
+    this.rotation = 0;
+    this.matrix = null;
+  }
+
+  /**
+   * Sets the status message displayed to the user.
+   * @param {string} phase - Current processing phase.
+   * @param {string} message - Status message to display.
+   */
+  setStatus(phase, message) {
+    this.statusElement.textContent = `${phase}: ${message}`;
+  }
+
+  /**
+   * Updates the frame count display.
+   * @param {number} processed - Number of frames processed.
+   * @param {number} total - Total number of frames to process.
+   */
+  updateFrameCount(processed, total) {
+    this.frameCountDisplay.textContent = `Processed frames: ${processed} / ${total}`;
+  }
+
+  /**
+   * Configures the UI manager with video metadata.
+   * @param {number} videoWidth - The coded width of the video.
+   * @param {number} videoHeight - The coded height of the video.
+   * @param {number[]} matrix - The video's transformation matrix.
+   * @param {number} zoom - The initial zoom level.
+   * @param {number} rotation - The initial rotation.
+   */
+  setup(videoWidth, videoHeight, matrix, zoom, rotation) {
+    this.videoWidth = videoWidth;
+    this.videoHeight = videoHeight;
+    this.zoom = zoom;
+    this.rotation = rotation;
+    this.matrix = matrix;
+    this.frameRenderer.setup(videoWidth, videoHeight, matrix, zoom);
+    this.updateRotation(rotation); // This will also setup canvas
+  }
+
+  /**
+   * Updates the rotation of the video display.
+   * @param {number} rotation - The new rotation in degrees.
+   */
+  updateRotation(rotation) {
+    this.rotation = rotation;
+    this.frameRenderer.updateRotation(this.rotation);
+    const {
+      width,
+      height
+    } = this.getCanvasDimensions();
+    this.setupCanvas(width, height);
+  }
+
+  /**
+   * Updates the zoom of the video display.
+   * @param {number} zoom - The new zoom value.
+   */
+  updateZoom(zoom) {
+    this.zoom = zoom;
+    this.frameRenderer.setup(this.videoWidth, this.videoHeight, this.matrix, zoom);
+    const {
+      width,
+      height
+    } = this.getCanvasDimensions();
+    this.setupCanvas(width, height);
+  }
+
+  /**
+   * Sets the canvas dimensions.
+   * @param {number} width - The new width.
+   * @param {number} height - The new height.
+   */
+  setupCanvas(width, height) {
+    this.canvas.width = width;
+    this.canvas.height = height;
+  }
+
+  /**
+   * Calculates canvas dimensions based on video dimensions, rotation, and zoom.
+   * @returns {{width: number, height: number}} The calculated dimensions.
+   */
+  getCanvasDimensions() {
+    const isSideways = this.rotation % 180 !== 0;
+    const width = isSideways ? this.videoHeight * this.zoom : this.videoWidth * this.zoom;
+    const height = isSideways ? this.videoWidth * this.zoom : this.videoHeight * this.zoom;
+    return {
+      width,
+      height
+    };
+  }
+
+  /**
+   * Renders a frame to the canvas.
+   * @param {VideoFrame} frame - Frame to render.
+   */
+  drawFrame(frame) {
+    this.frameRenderer.drawFrame(frame);
+  }
+
+  /**
+   * Draws the timestamp overlay on the canvas if enabled.
+   * @param {number} frameTimeMs - The timestamp of the current frame in milliseconds.
+   */
+  drawTimestamp(frameTimeMs) {
+    if (this.timestampRenderer) {
+      this.timestampRenderer.draw(this.ctx, frameTimeMs);
+    }
+  }
+
+  /**
+   * Creates and configures the timestamp renderer.
+   * @param {Date | null} userStartTime - The user-defined start time.
+   * @param {Date} mp4StartTime - The start time from the video metadata.
+   * @param {number} timeRangeStart - The start of the processing time range in ms.
+   */
+  createTimestampRenderer(userStartTime, mp4StartTime, timeRangeStart) {
+    if (!this.timestampProvider.isEnabled()) {
+      this.timestampRenderer = null;
+      return;
+    }
+    let startTime = userStartTime || mp4StartTime || new Date();
+    this.timestampRenderer = new _timeStampRenderer_js__WEBPACK_IMPORTED_MODULE_1__.TimeStampRenderer(startTime);
+    if (userStartTime) {
+      this.timestampRenderer.updateExtraTimeOffsetMS(-timeRangeStart);
+    }
+  }
+}
+
+/***/ }),
+
 /***/ "./videoDecoder.js":
 /*!*************************!*\
   !*** ./videoDecoder.js ***!
@@ -9502,7 +9922,7 @@ class VideoDecoder {
       this.decoder.ondequeue = () => {
         // Number of chunks to request
         const n = _logging_js__WEBPACK_IMPORTED_MODULE_0__.kDecodeQueueSize - this.decoder.decodeQueueSize;
-        if (n > 0) {
+        if (n > 0 && this.onDequeue) {
           this.onDequeue(n);
         }
       };
@@ -9881,20 +10301,22 @@ class VideoEncoder {
    * @param {VideoFrame} frame - The video frame to encode.
    */
   async encode(frame) {
-    // If the encoder's queue is full, wait until it has drained.
     while (this.encoder.encodeQueueSize > _logging_js__WEBPACK_IMPORTED_MODULE_0__.kEncodeQueueSize) {
+      // If a blocking promise already exists, it means another encode call
+      // is already waiting for the queue to drain. We should wait on that
+      // same promise.
       if (this.blockingPromise) {
-        throw new Error("Blocking promise already exists");
+        await this.blockingPromise;
+        // After waiting, we continue the loop to re-check the queue size.
+        continue;
       }
       // Create a promise that will be resolved when the queue has drained.
       this.blockingPromise = new Promise(resolve => {
         this.blockingPromiseResolve = resolve;
       });
-      (0,_logging_js__WEBPACK_IMPORTED_MODULE_0__.verboseLog)(`Blocking until queue size is reduced: ${this.encoder.encodeQueueSize}`);
       await this.blockingPromise;
     }
     // Encode the frame and then close it to free up resources.
-    (0,_logging_js__WEBPACK_IMPORTED_MODULE_0__.verboseLog)("Encoding frame:", frame);
     this.encoder.encode(frame);
     frame.close();
   }
@@ -10061,12 +10483,10 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */ });
 /* harmony import */ var _logging_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./logging.js */ "./logging.js");
 /* harmony import */ var _sampleManager_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ./sampleManager.js */ "./sampleManager.js");
-/* harmony import */ var _videoEncoder_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ./videoEncoder.js */ "./videoEncoder.js");
-/* harmony import */ var _timeStampRenderer_js__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! ./timeStampRenderer.js */ "./timeStampRenderer.js");
-/* harmony import */ var _videoFrameRenderer_js__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(/*! ./videoFrameRenderer.js */ "./videoFrameRenderer.js");
-/* harmony import */ var _videoDecoder_js__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(/*! ./videoDecoder.js */ "./videoDecoder.js");
-/* harmony import */ var _previewManager_js__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(/*! ./previewManager.js */ "./previewManager.js");
-
+/* harmony import */ var _videoDecoder_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ./videoDecoder.js */ "./videoDecoder.js");
+/* harmony import */ var _previewManager_js__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! ./previewManager.js */ "./previewManager.js");
+/* harmony import */ var _uiManager_js__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(/*! ./uiManager.js */ "./uiManager.js");
+/* harmony import */ var _processingPipeline_js__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(/*! ./processingPipeline.js */ "./processingPipeline.js");
 
 
 
@@ -10075,9 +10495,8 @@ __webpack_require__.r(__webpack_exports__);
 
 
 /**
- * VideoProcessor handles video processing operations including decoding, frame manipulation,
- * encoding, and preview generation. It manages the lifecycle of video processing from
- * initialization to finalization.
+ * VideoProcessor orchestrates the entire video processing workflow, including UI management,
+ * previewing, and coordinating the processing pipeline.
  */
 class VideoProcessor {
   /**
@@ -10094,37 +10513,38 @@ class VideoProcessor {
     frameCountDisplay,
     timestampProvider
   }) {
-    this.canvas = canvas;
-    this.ctx = this.canvas.getContext("2d");
-    this.status = statusElement;
-    this.encoder = null;
-    this.frameCountDisplay = frameCountDisplay;
-    this.nb_samples = 0;
-    this.frame_count = 0;
+    this.uiManager = new _uiManager_js__WEBPACK_IMPORTED_MODULE_4__.UIManager({
+      canvas,
+      statusElement,
+      frameCountDisplay,
+      timestampProvider
+    });
     this.state = "idle";
-    this.previousPromise = null;
-    this.timeRangeStart = undefined;
-    this.timeRangeEnd = undefined;
-    this.outputTaskPromises = [];
+    this.previousPromise = null; // For preview operations
     this.startProcessVideoTime = undefined;
     this.sampleManager = new _sampleManager_js__WEBPACK_IMPORTED_MODULE_1__.SampleManager();
-    this.timestampRenderer = null;
     this.timestampProvider = timestampProvider;
-    this.isChromeBased = false;
+    this.isChromeBased = navigator.userAgent.toLowerCase().includes("chrome");
     this.processingPromise = null;
     this.processingResolve = null;
     this.mp4StartTime = undefined;
-    this.frameRenderer = new _videoFrameRenderer_js__WEBPACK_IMPORTED_MODULE_4__.VideoFrameRenderer(this.ctx);
-    this.decoder = null;
-    // Preview-related properties
-    this.previewManager = null; // Will hold PreviewManager instance
+    this.decoder = null; // For previewing only
+    this.previewManager = null;
     this.lastPreviewPercentage = 0.0;
-    this.zoom = 1.0; // Add zoom property
-    this.rotation = 0; // Add rotation property
+
+    // Configuration and state properties
+    this.zoom = 1.0;
+    this.rotation = 0;
     this.fps = 0;
     this.videoWidth = 0;
     this.videoHeight = 0;
     this.matrix = undefined;
+    this.videoConfig = null;
+    this.nb_samples = 0;
+    this.frame_count = 0;
+    this.timeRangeStart = undefined;
+    this.timeRangeEnd = undefined;
+    this.pipeline = null;
   }
 
   /**
@@ -10134,7 +10554,7 @@ class VideoProcessor {
   setInitialRotation(matrix) {
     if (!matrix) return;
     const scale = 1 / 65536;
-    const [a, b, u, c, d, v, x, y, w] = matrix.map(val => val * scale);
+    const [a, b,, c, d] = matrix.map(val => val * scale);
     let rotation = 0;
     if (a === 0 && b === 1 && c === -1 && d === 0) {
       rotation = 90;
@@ -10152,12 +10572,7 @@ class VideoProcessor {
    */
   async updateRotation(rotation) {
     this.rotation = rotation;
-    this.frameRenderer.updateRotation(this.rotation);
-    const {
-      width,
-      height
-    } = this.getCanvasDimensions();
-    this.setupCanvas(width, height);
+    this.uiManager.updateRotation(rotation);
     if (this.state === "initialized") {
       await this.renderSampleInPercentage(this.lastPreviewPercentage);
     }
@@ -10169,43 +10584,22 @@ class VideoProcessor {
    */
   async updateZoom(zoom) {
     this.zoom = zoom;
-    const {
-      width,
-      height
-    } = this.getCanvasDimensions();
-    this.setupCanvas(width, height);
-    // Update frame renderer
-    this.frameRenderer.setup(this.videoWidth, this.videoHeight, this.matrix, zoom);
-
-    // If in preview mode, update the preview
+    this.uiManager.updateZoom(zoom);
     if (this.state === "initialized") {
       await this.renderSampleInPercentage(this.lastPreviewPercentage);
     }
   }
 
   /**
-   * Updates the status message displayed to the user
-   * @param {string} phase - Current processing phase
-   * @param {string} message - Status message to display
-   */
-  setStatus(phase, message) {
-    this.status.textContent = `${phase}: ${message}`;
-  }
-
-  /**
-   * Finalizes the video processing, closing encoder and calculating performance metrics
+   * Finalizes the video processing, calculating performance metrics.
+   * The pipeline finalizes itself separately.
    * @returns {Promise<void>}
    */
   async finalize() {
-    if (this.outputTaskPromises.length > 0) {
-      await Promise.all(this.outputTaskPromises);
-      this.outputTaskPromises = [];
-    }
     if (this.state !== "finalized") {
-      this.state = "finalized";
-      await this.encoder.finalize();
       const endProcessVideoTime = performance.now();
       (0,_logging_js__WEBPACK_IMPORTED_MODULE_0__.performanceLog)(`Total processing time: ${endProcessVideoTime - this.startProcessVideoTime} ms, FPS: ${this.frame_count / ((endProcessVideoTime - this.startProcessVideoTime) / 1000)}`);
+      this.state = "finalized";
       this.processingResolve();
     }
   }
@@ -10222,11 +10616,11 @@ class VideoProcessor {
     this.state = "initializing";
     try {
       const videoURL = URL.createObjectURL(file);
-      await this.processVideo(videoURL);
+      await this.setupDemuxer(videoURL);
       URL.revokeObjectURL(videoURL);
     } catch (error) {
       console.error("Error processing video:", error);
-      this.setStatus("error", error.message);
+      this.uiManager.setStatus("error", error.message);
     }
   }
 
@@ -10249,33 +10643,34 @@ class VideoProcessor {
   async processFile() {
     this.resetForReprocessing();
     if (this.state !== "initialized") {
-      throw new Error("Processor is not initializing");
+      throw new Error("Processor is not initialized");
     }
-    while (this.hasPreviousPromise) {
-      await this.waitForPreviousPromise();
-    }
-    await this.setupEncoder();
-    let userStartTime = this.timestampProvider.getUserStartTime();
-    let startTime = userStartTime || this.mp4StartTime || new Date();
-    // Only create timestampRenderer if timestamp is enabled
-    this.timestampRenderer = this.timestampProvider.isEnabled() ? new _timeStampRenderer_js__WEBPACK_IMPORTED_MODULE_3__.TimeStampRenderer(startTime) : null;
+    await this.waitForPreviousPromise(); // For preview
 
-    // Synchronize timestamp rendering with user-specified start time
-    // by applying negative timeRangeStart offset. This adjusts the base time
-    // to account for video trimming while maintaining accurate absolute timestamps.
-    if (userStartTime) {
-      this.timestampRenderer.updateExtraTimeOffsetMS(-this.timeRangeStart);
-    }
+    this.frame_count = 0;
+    this.uiManager.updateFrameCount(this.frame_count, this.nb_samples);
+    this.uiManager.createTimestampRenderer(this.timestampProvider.getUserStartTime(), this.mp4StartTime, this.timeRangeStart);
+    this.pipeline = new _processingPipeline_js__WEBPACK_IMPORTED_MODULE_5__.ProcessingPipeline({
+      onFrameProcessed: () => {
+        this.frame_count++;
+        this.uiManager.updateFrameCount(this.frame_count, this.nb_samples);
+      },
+      onFinalized: () => this.finalize(),
+      sampleManager: this.sampleManager,
+      uiManager: this.uiManager,
+      isChromeBased: this.isChromeBased,
+      fps: this.fps
+    });
+    await this.pipeline.setup(this.videoConfig);
     this.state = "processing";
     this.processingPromise = new Promise(resolve => {
       this.processingResolve = resolve;
     });
     try {
-      this.timerDispatch();
-      this.dispatch(_logging_js__WEBPACK_IMPORTED_MODULE_0__.kDecodeQueueSize);
+      this.pipeline.start(this.timeRangeStart, this.timeRangeEnd);
     } catch (error) {
       console.error("Error processing video:", error);
-      this.setStatus("error", error.message);
+      this.uiManager.setStatus("error", error.message);
     }
   }
 
@@ -10288,6 +10683,7 @@ class VideoProcessor {
   async processFileByTime(startMs, endMs) {
     this.startProcessVideoTime = performance.now();
     [this.nb_samples, this.timeRangeStart, this.timeRangeEnd] = this.sampleManager.finalizeTimeRange(startMs, endMs);
+    this.uiManager.updateFrameCount(0, this.nb_samples);
     await this.processFile();
   }
 
@@ -10300,45 +10696,8 @@ class VideoProcessor {
   async processFileByFrame(startIndex, endIndex) {
     this.startProcessVideoTime = performance.now();
     [this.nb_samples, this.timeRangeStart, this.timeRangeEnd] = this.sampleManager.finalizeSampleInIndex(startIndex, endIndex);
+    this.uiManager.updateFrameCount(0, this.nb_samples);
     await this.processFile();
-  }
-
-  /**
-   * Dispatches decode requests to process video chunks
-   * @param {number} n - Number of chunks to dispatch
-   */
-  dispatch(n) {
-    if (this.state !== "processing") {
-      return;
-    }
-    (0,_logging_js__WEBPACK_IMPORTED_MODULE_0__.verboseLog)(`Dispatching ${n} chunks`);
-    this.sampleManager.requestChunks(n, chunk => {
-      this.decoder.decode(chunk);
-    }, async () => {
-      this.state = "exhausted";
-      await this.decoder.flush();
-      if (this.decoder.decodeQueueSize == 0) {
-        this.finalize();
-      }
-    });
-  }
-
-  /**
-   * Initiates timer-based dispatch for non-Chrome browsers
-   */
-  timerDispatch() {
-    if (this.state !== "processing") {
-      return;
-    }
-    if (this.isChromeBased) {
-      return;
-    }
-    this.decoder.startTimerDispatch(n => {
-      if (n > 0) {
-        this.dispatch(n);
-      }
-      this.timerDispatch();
-    });
   }
 
   /**
@@ -10346,160 +10705,64 @@ class VideoProcessor {
    * @param {string} uri - Video URI to process
    * @returns {Promise<void>}
    */
-  async processVideo(uri) {
-    const demuxer = new _videoDecoder_js__WEBPACK_IMPORTED_MODULE_5__.MP4Demuxer(uri, {
+  async setupDemuxer(uri) {
+    const demuxer = new _videoDecoder_js__WEBPACK_IMPORTED_MODULE_2__.MP4Demuxer(uri, {
       onConfig: config => this.setup(config),
-      setStatus: (phase, message) => this.setStatus(phase, message),
+      setStatus: (phase, message) => this.uiManager.setStatus(phase, message),
       sampleManager: this.sampleManager
     });
   }
 
   /**
-   * Configures processor components with video metadata
+   * Configures processor with video metadata for initialization and previewing.
    * @param {Object} config - Video configuration object
    * @returns {Promise<void>}
    */
   async setup(config) {
-    // If browser is chrome based.
-    if (navigator.userAgent.toLowerCase().includes("chrome")) {
-      this.isChromeBased = true;
-    }
-    await this.setupDecoder(config);
+    this.videoConfig = config;
     this.videoWidth = config.codedWidth;
     this.videoHeight = config.codedHeight;
     this.matrix = config.matrix;
-    this.setInitialRotation(this.matrix);
-    const {
-      width,
-      height
-    } = this.getCanvasDimensions();
-    this.setupCanvas(width, height);
     this.fps = config.fps;
-    this.frameRenderer.setup(config.codedWidth, config.codedHeight, config.matrix, this.zoom);
     this.mp4StartTime = config.startTime;
+
+    // Setup decoder for previewing
+    await this.setupPreviewDecoder(config);
+    this.uiManager.setup(this.videoWidth, this.videoHeight, this.matrix, this.zoom, this.rotation);
+    this.setInitialRotation(this.matrix);
     this.frame_count = 0;
-    this.frameCountDisplay.textContent = `Processed frames: 0 / ${this.nb_samples}`;
+    this.uiManager.updateFrameCount(0, 0); // Initially 0 samples
+
     this.state = "initialized";
-    // Initialize preview manager.
-    this.previewManager = new _previewManager_js__WEBPACK_IMPORTED_MODULE_6__.PreviewManager(this.decoder, this.sampleManager);
+    this.previewManager = new _previewManager_js__WEBPACK_IMPORTED_MODULE_3__.PreviewManager(this.decoder, this.sampleManager);
     if (this.onInitialized) {
       this.onInitialized(this.sampleManager.sampleCount());
     }
   }
-  async setupDecoder(config) {
-    this.decoder = new _videoDecoder_js__WEBPACK_IMPORTED_MODULE_5__.VideoDecoder({
-      onFrame: frame => this.handleDecoderOutput(frame),
+  async setupPreviewDecoder(config) {
+    // This decoder is only for previews. The pipeline will create its own.
+    this.decoder = new _videoDecoder_js__WEBPACK_IMPORTED_MODULE_2__.VideoDecoder({
+      onFrame: frame => this.handlePreviewDecoderOutput(frame),
       onError: e => console.error(e),
-      onDequeue: n => this.dispatch(n),
+      // No onDequeue for preview decoder, it's driven on demand.
       isChromeBased: this.isChromeBased
     });
     await this.decoder.setup(config);
-    this.setStatus("decode", "Decoder configured");
+    this.uiManager.setStatus("decode", "Preview Decoder configured");
     await this.sampleManager.waitForReady();
   }
-  setupCanvas(width, height) {
-    this.canvas.width = width;
-    this.canvas.height = height;
-  }
-  getCanvasDimensions() {
-    const isSideways = this.rotation % 180 !== 0;
-    const width = isSideways ? this.videoHeight * this.zoom : this.videoWidth * this.zoom;
-    const height = isSideways ? this.videoWidth * this.zoom : this.videoHeight * this.zoom;
-    return {
-      width,
-      height
-    };
-  }
-  getEncoderDimensions() {
-    const isSideways = this.rotation % 180 !== 0;
-    const width = Math.ceil((isSideways ? this.videoHeight : this.videoWidth) * this.zoom / 64) * 64;
-    const height = Math.ceil((isSideways ? this.videoWidth : this.videoHeight) * this.zoom / 64) * 64;
-    return {
-      width,
-      height
-    };
-  }
-  async setupEncoder() {
-    this.encoder = new _videoEncoder_js__WEBPACK_IMPORTED_MODULE_2__.VideoEncoder();
-    const {
-      width,
-      height
-    } = this.getEncoderDimensions();
-    const fps = this.fps;
-    await this.encoder.init(width, height, fps, !this.isChromeBased, true);
-  }
 
   /**
-   * Renders a frame to the canvas
-   * @param {VideoFrame} frame - Frame to render
-   */
-  drawFrame(frame) {
-    this.frameRenderer.drawFrame(frame);
-  }
-
-  /**
-   * Processes a single video frame
-   * @param {VideoFrame} frame - Frame to process
-   * @returns {Promise<void>}
-   */
-  async processFrame(frame) {
-    const frameTimeMs = Math.floor(frame.timestamp / 1000);
-    if (this.timeRangeStart === undefined || this.timeRangeEnd === undefined) {
-      throw new Error("Time range not set");
-    }
-
-    // Skip frames before start time
-    if (frameTimeMs < this.timeRangeStart) {
-      frame.close();
-      return;
-    }
-
-    // Stop processing after end time
-    if (frameTimeMs > this.timeRangeEnd) {
-      frame.close();
-      return;
-    }
-    while (this.hasPreviousPromise) {
-      await this.waitForPreviousPromise();
-    }
-    try {
-      this.drawFrame(frame);
-      if (this.timestampRenderer) {
-        this.timestampRenderer.draw(this.ctx, frameTimeMs);
-      }
-      const videoFrameOptions = {
-        timestamp: frame.timestamp,
-        duration: frame.duration
-      };
-      frame.close();
-      (0,_logging_js__WEBPACK_IMPORTED_MODULE_0__.verboseLog)(`videoFrameOptions: ${JSON.stringify(videoFrameOptions)}`);
-      const newFrame = new VideoFrame(this.canvas, videoFrameOptions);
-      this.frame_count++;
-      this.frameCountDisplay.textContent = `Processed frames: ${this.frame_count} / ${this.nb_samples}`;
-      this.previousPromise = this.encoder.encode(newFrame);
-      await this.previousPromise;
-    } catch (error) {
-      console.error("Error processing frame:", error);
-    }
-  }
-
-  /**
-   * Handles decoded frames from the decoder
+   * Handles decoded frames from the preview decoder.
    * @param {VideoFrame} frame - Decoded video frame
    * @returns {Promise<void>}
    */
-  async handleDecoderOutput(frame) {
-    if (this.state === "processing" || this.state === "exhausted") {
-      this.outputTaskPromises.push(this.processFrame(frame));
-      return;
-    }
+  async handlePreviewDecoderOutput(frame) {
     if (this.state !== "initialized") {
       frame.close();
-      throw new Error("Processor should be in the initialized state");
+      throw new Error("Processor should be in the initialized state for previewing");
     }
-
-    // Final phase: Handle preview frame drawing
-    this.previewManager.drawPreview(frame, frame => this.drawFrame(frame));
+    this.previewManager.drawPreview(frame, f => this.uiManager.drawFrame(f));
     frame.close();
   }
 
@@ -10518,12 +10781,7 @@ class VideoProcessor {
 
     // Phase 1: Prepare preview and get handle
     const previewHandle = this.previewManager.preparePreview(percentage);
-
-    // Wait for any ongoing operations to complete
-    while (this.hasPreviousPromise) {
-      await this.waitForPreviousPromise();
-    }
-
+    await this.waitForPreviousPromise();
     // Phase 2: start preview decoding
     const previewPromise = this.previewManager.executePreview(previewHandle);
     if (previewPromise) {
@@ -10544,7 +10802,7 @@ class VideoProcessor {
    * @returns {Promise<void>}
    */
   async waitForProcessing() {
-    if (this.state === "processing") {
+    if (this.state !== "processing" && this.state !== "exhausted") {
       return;
     }
     if (this.processingPromise) {
