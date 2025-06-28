@@ -8682,7 +8682,15 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
 /* harmony export */   FrameRangeSlider: () => (/* binding */ FrameRangeSlider)
 /* harmony export */ });
+/**
+ * Manages a dual-thumb slider for selecting a frame range from a video.
+ * It handles user input, updates the slider's visual representation,
+ * and provides the selected frame range.
+ */
 class FrameRangeSlider {
+  /**
+   * Initializes the slider by querying DOM elements and setting up initial state.
+   */
   constructor() {
     this.timeSelectionRadios = document.getElementsByName("timeSelection");
     this.sliderContainer = document.querySelector(".slider-container");
@@ -8700,6 +8708,10 @@ class FrameRangeSlider {
     this.totalFrames = 0;
     this.initializeEventListeners();
   }
+
+  /**
+   * Sets up event listeners for the time selection radio buttons and slider thumbs.
+   */
   initializeEventListeners() {
     this.timeSelectionRadios.forEach(radio => {
       radio.addEventListener("change", e => {
@@ -8715,6 +8727,11 @@ class FrameRangeSlider {
       thumb.addEventListener("touchstart", this.handleStart.bind(this));
     });
   }
+
+  /**
+   * Handles the start of a drag operation on a slider thumb.
+   * @param {MouseEvent|TouchEvent} e - The event object.
+   */
   handleStart(e) {
     e.preventDefault();
     const thumb = e.target;
@@ -8732,6 +8749,11 @@ class FrameRangeSlider {
     document.addEventListener("touchmove", handleMove);
     document.addEventListener("touchend", handleEnd);
   }
+
+  /**
+   * Handles the movement of a slider thumb during a drag operation.
+   * @param {MouseEvent|TouchEvent} e - The event object.
+   */
   handleMove(e) {
     if (!this.isDragging) return;
     const rect = this.sliderTrack.getBoundingClientRect();
@@ -8747,11 +8769,20 @@ class FrameRangeSlider {
     }
     this.updateSliderDisplay();
   }
+
+  /**
+   * Initializes the slider with the total number of frames.
+   * @param {number} totalFrames - The total number of frames in the video.
+   */
   initialize(totalFrames) {
     this.totalFramesDisplay.textContent = totalFrames;
     this.totalFrames = totalFrames;
     this.updateSliderDisplay();
   }
+
+  /**
+   * Updates the visual display of the slider, including thumb positions and frame numbers.
+   */
   updateSliderDisplay() {
     this.thumbStart.style.left = `${this.startPercent}%`;
     this.thumbEnd.style.left = `${this.endPercent}%`;
@@ -8763,9 +8794,19 @@ class FrameRangeSlider {
     this.startFrameDisplay.textContent = startFrame;
     this.endFrameDisplay.textContent = endFrame;
   }
+
+  /**
+   * Checks if the slider mode is currently active.
+   * @returns {boolean} - True if the slider is visible, false otherwise.
+   */
   isSliderModeActive() {
     return this.sliderContainer.classList.contains("visible");
   }
+
+  /**
+   * Gets the selected frame range.
+   * @returns {{startFrame: number, endFrame: number}} - The start and end frames.
+   */
   getFrameRange() {
     const totalFrames = this.totalFrames;
     return {
@@ -8773,6 +8814,11 @@ class FrameRangeSlider {
       endFrame: Math.floor(this.endPercent / 100 * totalFrames)
     };
   }
+
+  /**
+   * Callback function that is called when the percentage of the slider changes.
+   * @param {number} percentage - The new percentage value.
+   */
   onUpdatePercentage(percentage) {
     if (this.onupdatepercentage) {
       this.onupdatepercentage(percentage);
@@ -8911,10 +8957,26 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
 /* harmony export */   SampleManager: () => (/* binding */ SampleManager)
 /* harmony export */ });
+/**
+ * Manages video samples, providing functionalities for adding, finalizing,
+ * and processing video data. It supports operations like time-based and
+ * index-based sample selection, and provides chunks for decoding.
+ */
 class SampleManager {
+  /**
+   * Calculates the timestamp of a sample in milliseconds.
+   * @param {object} sample - The video sample.
+   * @returns {number} - The sample's timestamp in milliseconds.
+   */
   static sampleTimeMs(sample) {
     return sample.cts * 1000 / sample.timescale;
   }
+
+  /**
+   * Creates an EncodedVideoChunk from a video sample.
+   * @param {object} sample - The video sample.
+   * @returns {EncodedVideoChunk} - The resulting video chunk.
+   */
   static encodedVideoChunkFromSample(sample) {
     return new EncodedVideoChunk({
       type: sample.is_sync ? "key" : "delta",
@@ -8923,37 +8985,68 @@ class SampleManager {
       data: sample.data
     });
   }
+
+  /**
+   * Initializes a new SampleManager instance.
+   */
   constructor() {
     this.samples = [];
     this.originalSamples = null;
     this.currentIndex = 0;
     this.finalized = false;
-    this.state = "receiving";
+    this.state = "receiving"; // Initial state
     this.readyPromise = new Promise(resolve => {
       this.resolveReadyPromise = resolve;
     });
   }
+
+  /**
+   * Returns the total number of samples.
+   * @returns {number} - The number of samples.
+   */
   sampleCount() {
     return this.samples.length;
   }
+
+  /**
+   * Adds new samples to the manager.
+   * @param {Array<object>} newSamples - An array of new samples to add.
+   * @throws {Error} If called after the manager is finalized.
+   */
   addSamples(newSamples) {
     if (this.finalized) {
       throw new Error("Cannot add samples to finalized SampleManager");
     }
     this.samples.push(...newSamples);
   }
+
+  /**
+   * Waits until the initial set of samples has been received and finalized.
+   * @returns {Promise<void>}
+   */
   async waitForReady() {
     if (this.state === "finalized") {
       return;
     }
     await this.readyPromise;
   }
+
+  /**
+   * Finalizes the initial sample loading, making the manager ready for processing.
+   */
   finalize() {
     this.originalSamples = this.samples;
     this.resolveReadyPromise();
     this.resolveReadyPromise = null;
     this.state = "finalized";
   }
+
+  /**
+   * Finalizes the sample list to a specific time range.
+   * @param {number} timeRangeStart - The start time in milliseconds.
+   * @param {number} timeRangeEnd - The end time in milliseconds.
+   * @returns {[number, number, number]} - The number of samples, and the actual start and end times.
+   */
   finalizeTimeRange(timeRangeStart, timeRangeEnd) {
     this.samples = this.originalSamples;
     let startIndex = 0;
@@ -8963,6 +9056,7 @@ class SampleManager {
     if (timeRangeStart !== undefined) {
       startIndex = this.lowerBound(timeRangeStart);
       preciousStartIndex = startIndex;
+      // Rewind to the previous keyframe
       while (startIndex > 0 && !this.samples[startIndex].is_sync) {
         startIndex--;
       }
@@ -8970,6 +9064,7 @@ class SampleManager {
     if (timeRangeEnd !== undefined) {
       endIndex = this.upperBound(timeRangeEnd);
       preciousEndIndex = endIndex;
+      // Fast-forward to the next keyframe if the next sample is not a keyframe
       while (endIndex < this.samples.length - 1 && !this.samples[endIndex + 1].is_sync) {
         endIndex++;
       }
@@ -8988,15 +9083,24 @@ class SampleManager {
     this.finalized = true;
     return [this.samples.length, outputTimeRangeStart, outputTimeRangeEnd];
   }
+
+  /**
+   * Finalizes the sample list to a specific index range.
+   * @param {number} startIndex - The starting sample index.
+   * @param {number} endIndex - The ending sample index.
+   * @returns {[number, number, number]} - The number of samples, and the actual start and end times.
+   */
   finalizeSampleInIndex(startIndex, endIndex) {
     this.samples = this.originalSamples;
     let preciousStartIndex = startIndex;
+    // Rewind to the previous keyframe
     while (startIndex > 0 && !this.samples[startIndex].is_sync) {
       startIndex--;
     }
     if (endIndex >= this.samples.length) {
       endIndex = this.samples.length - 1;
     }
+    // Ensure the last sample has a valid timestamp
     while (endIndex > 0 && !this.samples[endIndex].cts) {
       endIndex--;
     }
@@ -9010,6 +9114,12 @@ class SampleManager {
     this.finalized = true;
     return [this.samples.length, outputTimeRangeStart, outputTimeRangeEnd];
   }
+
+  /**
+   * Finds the first sample index at or after a given time.
+   * @param {number} targetTime - The time in milliseconds.
+   * @returns {number} - The sample index.
+   */
   lowerBound(targetTime) {
     let left = 0;
     let right = this.samples.length - 1;
@@ -9024,6 +9134,12 @@ class SampleManager {
     }
     return left;
   }
+
+  /**
+   * Finds the last sample index at or before a given time.
+   * @param {number} targetTime - The time in milliseconds.
+   * @returns {number} - The sample index.
+   */
   upperBound(targetTime) {
     let left = 0;
     let right = this.samples.length - 1;
@@ -9038,6 +9154,14 @@ class SampleManager {
     }
     return right;
   }
+
+  /**
+   * Requests a number of chunks and provides them via a callback.
+   * @param {number} count - The number of chunks to request.
+   * @param {function} onChunk - Callback to handle each chunk.
+   * @param {function} onExhausted - Callback when all samples are processed.
+   * @returns {number} - The number of chunks processed.
+   */
   requestChunks(count, onChunk, onExhausted) {
     let processed = 0;
     while (processed < count && this.currentIndex < this.samples.length) {
@@ -9051,17 +9175,30 @@ class SampleManager {
     }
     return processed;
   }
+
+  /**
+   * Finds a set of samples around a given percentage of the video for preview.
+   * @param {number} percentage - The percentage (0-100) into the video.
+   * @returns {Array<object>} - An array of samples for the preview.
+   * @throws {Error} If called after the manager is finalized.
+   */
   findSamplesAtPercentage(percentage) {
     if (this.finalized) {
       throw new Error("Cannot find sample in finalized SampleManager");
     }
     const sampleIndex = Math.floor(percentage / 100 * (this.samples.length - 1));
+
+    // Rewind to the previous keyframe to ensure decodability
     let keyFrameIndex = sampleIndex;
     while (keyFrameIndex > 0 && !this.samples[keyFrameIndex].is_sync) {
       keyFrameIndex--;
     }
     return this.samples.slice(keyFrameIndex, sampleIndex + 1);
   }
+
+  /**
+   * Resets the manager to its initial state.
+   */
   reset() {
     this.currentIndex = 0;
     this.samples = [];
@@ -9069,6 +9206,10 @@ class SampleManager {
     this.currentIndex = 0;
     this.finalized = false;
   }
+
+  /**
+   * Resets the manager for reprocessing, keeping the original samples.
+   */
   resetForReprocessing() {
     this.currentIndex = 0;
     this.finalized = false;
@@ -9088,7 +9229,16 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
 /* harmony export */   TimeRangeProvider: () => (/* binding */ TimeRangeProvider)
 /* harmony export */ });
+/**
+ * Provides functionality to get and validate a time range from user input fields.
+ */
 class TimeRangeProvider {
+  /**
+   * Initializes the provider with the start and end time input elements.
+   * @param {object} config - The configuration object.
+   * @param {HTMLInputElement} config.startTimeInput - The input element for the start time.
+   * @param {HTMLInputElement} config.endTimeInput - The input element for the end time.
+   */
   constructor({
     startTimeInput,
     endTimeInput
@@ -9096,16 +9246,32 @@ class TimeRangeProvider {
     this.startTimeInput = startTimeInput;
     this.endTimeInput = endTimeInput;
   }
+
+  /**
+   * Converts a time string in "MM:SS" format to milliseconds.
+   * @param {string} timeStr - The time string to convert.
+   * @returns {number} - The time in milliseconds.
+   */
   convertTimeToMs(timeStr) {
     const [minutes, seconds] = timeStr.split(":").map(Number);
     return (minutes * 60 + seconds) * 1000;
   }
+
+  /**
+   * Validates the format of a time input field, resetting it if invalid.
+   * @param {HTMLInputElement} input - The input element to validate.
+   */
   validateTimeInput(input) {
     const regex = /^[0-5][0-9]:[0-5][0-9]$/;
     if (!regex.test(input.value)) {
       input.value = "00:00";
     }
   }
+
+  /**
+   * Gets the selected time range in milliseconds.
+   * @returns {{startMs: number|undefined, endMs: number|undefined}} - The start and end times.
+   */
   getTimeRange() {
     this.validateTimeInput(this.startTimeInput);
     this.validateTimeInput(this.endTimeInput);
@@ -9137,7 +9303,18 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
 /* harmony export */   TimeStampProvider: () => (/* binding */ TimeStampProvider)
 /* harmony export */ });
+/**
+ * Manages the timestamp functionality, including UI interactions and
+ * validation for the user-provided start time.
+ */
 class TimeStampProvider {
+  /**
+   * Initializes the provider with necessary DOM elements.
+   * @param {object} config - The configuration object.
+   * @param {HTMLInputElement} config.timestampStartInput - Input for the start timestamp.
+   * @param {HTMLInputElement} config.enableTimestampCheckbox - Checkbox to enable/disable timestamps.
+   * @param {HTMLElement} config.timestampInputs - The container for timestamp inputs.
+   */
   constructor({
     timestampStartInput,
     enableTimestampCheckbox,
@@ -9153,9 +9330,19 @@ class TimeStampProvider {
       this.timestampInputs.classList.toggle("visible", this.enableTimestampCheckbox.checked);
     });
   }
+
+  /**
+   * Checks if the timestamp functionality is enabled by the user.
+   * @returns {boolean} - True if enabled, false otherwise.
+   */
   isEnabled() {
     return this.enableTimestampCheckbox.checked;
   }
+
+  /**
+   * Validates the format of the user-provided timestamp.
+   * @returns {boolean} - True if the format is valid, false otherwise.
+   */
   validateTimestampInput() {
     const regex = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
     if (this.timestampStartInput.value && !regex.test(this.timestampStartInput.value)) {
@@ -9165,6 +9352,11 @@ class TimeStampProvider {
     }
     return true;
   }
+
+  /**
+   * Gets the user-defined start time as a Date object.
+   * @returns {Date|null} - The start time or null if not provided or invalid.
+   */
   getUserStartTime() {
     if (!this.timestampStartInput.value) {
       return null;
@@ -9269,7 +9461,19 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var mp4box__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! mp4box */ "./node_modules/mp4box/dist/mp4box.all.js");
 
 
+
+/**
+ * Wraps the WebCodecs VideoDecoder API to provide a consistent interface for decoding video frames.
+ */
 class VideoDecoder {
+  /**
+   * Initializes the VideoDecoder.
+   * @param {object} config - The configuration object.
+   * @param {function} config.onFrame - Callback for when a frame is decoded.
+   * @param {function} config.onDequeue - Callback to request more data.
+   * @param {function} config.onError - Callback for decoding errors.
+   * @param {boolean} config.isChromeBased - Flag indicating if the browser is Chrome-based.
+   */
   constructor({
     onFrame,
     onDequeue,
@@ -9282,6 +9486,11 @@ class VideoDecoder {
     this.onError = onError;
     this.isChromeBased = isChromeBased;
   }
+
+  /**
+   * Configures and sets up the underlying VideoDecoder.
+   * @param {object} config - The video decoder configuration.
+   */
   async setup(config) {
     // Initialize the decoder
     this.decoder = new window.VideoDecoder({
@@ -9300,28 +9509,62 @@ class VideoDecoder {
     }
     await this.decoder.configure(config);
   }
+
+  /**
+   * Starts a timer-based dispatch mechanism for non-Chrome browsers.
+   * @param {function} onDispatch - The function to call to dispatch more data.
+   */
   startTimerDispatch(onDispatch) {
     setTimeout(() => {
       const n = _logging_js__WEBPACK_IMPORTED_MODULE_0__.kDecodeQueueSize - this.decodeQueueSize;
       onDispatch(n);
     }, 1000);
   }
+
+  /**
+   * Gets the current size of the decoder's queue.
+   * @returns {number} The decode queue size.
+   */
   get decodeQueueSize() {
     return this.decoder?.decodeQueueSize || 0;
   }
+
+  /**
+   * Sets the state of the decoder.
+   * @param {string} state - The new state.
+   */
   setState(state) {
     this.state = state;
   }
+
+  /**
+   * Decodes a video chunk.
+   * @param {EncodedVideoChunk} chunk - The chunk to decode.
+   */
   decode(chunk) {
     this.decoder?.decode(chunk);
   }
+
+  /**
+   * Flushes any pending frames from the decoder.
+   */
   async flush() {
     await this.decoder?.flush();
   }
 }
 
-// MP4 demuxer class implementation
+/**
+ * Demuxes an MP4 file to extract video samples and configuration.
+ */
 class MP4Demuxer {
+  /**
+   * Initializes the MP4Demuxer.
+   * @param {string} uri - The URI of the MP4 file.
+   * @param {object} config - The configuration object.
+   * @param {function} config.onConfig - Callback with the video configuration.
+   * @param {function} config.setStatus - Callback to update the status.
+   * @param {SampleManager} config.sampleManager - The sample manager to handle extracted samples.
+   */
   constructor(uri, {
     onConfig,
     setStatus,
@@ -9339,6 +9582,11 @@ class MP4Demuxer {
     this.sampleManager = sampleManager;
     this.setupFile(uri);
   }
+
+  /**
+   * Fetches the MP4 file and pipes it to the demuxer.
+   * @param {string} uri - The URI of the MP4 file.
+   */
   async setupFile(uri) {
     const fileSink = new MP4FileSink(this.file, this.setStatus);
     const response = await fetch(uri);
@@ -9346,6 +9594,12 @@ class MP4Demuxer {
       highWaterMark: 2
     }));
   }
+
+  /**
+   * Extracts the decoder-specific description from the video track.
+   * @param {object} track - The video track information.
+   * @returns {Uint8Array} The decoder-specific description.
+   */
   getDescription(track) {
     const trak = this.file.getTrackById(track.id);
     for (const entry of trak.mdia.minf.stbl.stsd.entries) {
@@ -9358,6 +9612,12 @@ class MP4Demuxer {
     }
     throw new Error("avcC, hvcC, vpcC, or av1C box not found");
   }
+
+  /**
+   * Calculates the frames per second (FPS) of the video track.
+   * @param {object} track - The video track information.
+   * @returns {number} The calculated FPS.
+   */
   calculateFPS(track) {
     // Convert duration to seconds using timescale
     const durationInSeconds = track.duration / track.timescale;
@@ -9368,6 +9628,11 @@ class MP4Demuxer {
     // Round to 2 decimal places for cleaner display
     return Math.round(fps * 100) / 100;
   }
+
+  /**
+   * Called when the demuxer is ready and has parsed the file's metadata.
+   * @param {object} info - The file information.
+   */
   onReady(info) {
     this.setStatus("demux", "Ready");
     const track = info.videoTracks[0];
@@ -9391,6 +9656,13 @@ class MP4Demuxer {
     this.file.setExtractionOptions(track.id);
     this.file.start();
   }
+
+  /**
+   * Called when video samples are extracted from the file.
+   * @param {number} track_id - The ID of the track.
+   * @param {object} ref - Reference object.
+   * @param {Array<object>} samples - The extracted samples.
+   */
   onSamples(track_id, ref, samples) {
     if (this.stopProcessingSamples) return;
     this.passed_samples += samples.length;
@@ -9402,13 +9674,25 @@ class MP4Demuxer {
   }
 }
 
-// MP4 file sink implementation
+/**
+ * A WritableStream sink for piping data to the MP4 demuxer.
+ */
 class MP4FileSink {
+  /**
+   * Initializes the MP4FileSink.
+   * @param {object} file - The mp4box.js file object.
+   * @param {function} setStatus - Callback to update the status.
+   */
   constructor(file, setStatus) {
     this.file = file;
     this.setStatus = setStatus;
     this.offset = 0;
   }
+
+  /**
+   * Writes a chunk of data to the file.
+   * @param {Uint8Array} chunk - The data chunk.
+   */
   write(chunk) {
     const buffer = new ArrayBuffer(chunk.byteLength);
     new Uint8Array(buffer).set(chunk);
@@ -9417,11 +9701,16 @@ class MP4FileSink {
     this.setStatus("fetch", `${(this.offset / 1024 / 1024).toFixed(1)} MB`);
     this.file.appendBuffer(buffer);
   }
+
+  /**
+   * Closes the file sink and flushes any pending data.
+   */
   close() {
     this.setStatus("fetch", "Complete");
     this.file.flush();
   }
 }
+"";
 
 /***/ }),
 
@@ -9440,38 +9729,66 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var mp4_muxer__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! mp4-muxer */ "./node_modules/mp4-muxer/build/mp4-muxer.mjs");
 
 
+
+/**
+ * Handles video encoding using the WebCodecs API and muxing with mp4-muxer.
+ * It can write the output to the File System Access API or in-memory.
+ */
 class VideoEncoder {
+  /**
+   * Initializes the VideoEncoder, setting up initial state values.
+   * This includes properties for the encoder, muxer, file handling,
+   * and managing backpressure during encoding.
+   */
   constructor() {
-    this.encoder = null;
-    this.blockingPromise = null;
-    this.blockingPromiseResolve = null;
-    this.muxer = null;
-    this.chunks = [];
-    this.fileHandle = null;
-    this.fileStream = null;
-    this.root = null;
-    this.tempFileName = `temp-manji.mp4`;
+    this.encoder = null; // Holds the VideoEncoder instance.
+    this.blockingPromise = null; // A promise used to pause encoding when the queue is full.
+    this.blockingPromiseResolve = null; // The resolve function for the blocking promise.
+    this.muxer = null; // Holds the mp4-muxer instance.
+    this.chunks = []; // Stores video chunks if not using the file system.
+    this.fileHandle = null; // Handle for the output file.
+    this.fileStream = null; // Writable stream for the output file.
+    this.root = null; // Root directory for file system access.
+    this.tempFileName = `temp-manji.mp4`; // Temporary file name for the encoded video.
   }
+
+  /**
+   * Initializes the encoder and muxer with the specified parameters.
+   * This method configures the video encoding settings, including resolution,
+   * frame rate, and bitrate. It also sets up the output target, which can be
+   * either an in-memory buffer or the file system.
+   *
+   * @param {number} width - The width of the video.
+   * @param {number} height - The height of the video.
+   * @param {number} fps - The frames per second of the video.
+   * @param {boolean} useCalculatedBitrate - Whether to use a calculated bitrate.
+   * @param {boolean} [useFileSystem=false] - Whether to use the File System Access API for output.
+   */
   async init(width, height, fps, useCalculatedBitrate, useFileSystem = false) {
     (0,_logging_js__WEBPACK_IMPORTED_MODULE_0__.verboseLog)("Initializing encoder with dimensions:", {
       width,
       height
     });
 
-    // Calculate maximum dimensions for Level 5.1 (4096x2304)
+    // Define maximum dimensions for H.264 Level 5.1 (e.g., 4K resolution).
     const maxWidth = 4096;
     const maxHeight = 2304;
     let targetWidth = width;
     let targetHeight = height;
 
-    // Scale down if needed while maintaining aspect ratio
+    // If the video dimensions exceed the maximum, scale it down while maintaining the aspect ratio.
+    // This feature is currently disabled.
     if ((width > maxWidth || height > maxHeight) && false) {}
 
-    // Calculate appropriate bitrate (0.2 bits per pixel per frame)
+    // Calculate an appropriate bitrate for the video. A common heuristic is 0.2 bits per pixel.
+    // The bitrate is capped at 30 Mbps, a reasonable limit for H.264 Level 5.1.
     const pixelCount = targetWidth * targetHeight;
     const bitsPerPixel = 0.2;
     const targetBitrate = Math.min(Math.floor(pixelCount * bitsPerPixel * 30), 30_000_000 // Cap at 30Mbps for Level 5.1
     );
+
+    // If using the file system, set up a web worker to handle file I/O.
+    // This prevents blocking the main thread.
     if (useFileSystem) {
       this.fileWorker = new Worker("fileWorker.js");
       this.fileWorker.postMessage({
@@ -9480,6 +9797,8 @@ class VideoEncoder {
           fileName: this.tempFileName
         }
       });
+
+      // Configure the muxer to write data to the file worker.
       this.muxer = new mp4_muxer__WEBPACK_IMPORTED_MODULE_1__.Muxer({
         target: new mp4_muxer__WEBPACK_IMPORTED_MODULE_1__.StreamTarget({
           chunked: true,
@@ -9502,6 +9821,7 @@ class VideoEncoder {
         firstTimestampBehavior: "offset"
       });
     } else {
+      // If not using the file system, store the video chunks in an in-memory array.
       this.muxer = new mp4_muxer__WEBPACK_IMPORTED_MODULE_1__.Muxer({
         target: new mp4_muxer__WEBPACK_IMPORTED_MODULE_1__.StreamTarget({
           chunked: true,
@@ -9521,10 +9841,16 @@ class VideoEncoder {
         firstTimestampBehavior: "offset"
       });
     }
+
+    // Initialize the VideoEncoder with a callback to handle encoded chunks.
+    // The output of the encoder is fed directly to the muxer.
     this.encoder = new window.VideoEncoder({
       output: (chunk, meta) => this.muxer.addVideoChunk(chunk, meta),
       error: e => console.error("Encoding error:", e)
     });
+
+    // Set up a callback to handle the 'dequeue' event. This is used to manage
+    // backpressure from the encoder's internal queue.
     this.encoder.ondequeue = () => {
       if (this.blockingPromise && this.encoder.encodeQueueSize < _logging_js__WEBPACK_IMPORTED_MODULE_0__.kEncodeQueueSize) {
         this.blockingPromiseResolve();
@@ -9532,8 +9858,11 @@ class VideoEncoder {
         this.blockingPromiseResolve = null;
       }
     };
+
+    // Configure the encoder with the specified video parameters.
     const config = {
       codec: "avc1.640033",
+      // H.264 High Profile Level 5.1
       width: targetWidth,
       height: targetHeight,
       framerate: fps
@@ -9543,29 +9872,51 @@ class VideoEncoder {
     }
     await this.encoder.configure(config);
   }
+
+  /**
+   * Encodes a single video frame. This method handles backpressure by checking
+   * the encoder's queue size. If the queue is too large, it pauses encoding
+   * until the queue has drained.
+   *
+   * @param {VideoFrame} frame - The video frame to encode.
+   */
   async encode(frame) {
+    // If the encoder's queue is full, wait until it has drained.
     while (this.encoder.encodeQueueSize > _logging_js__WEBPACK_IMPORTED_MODULE_0__.kEncodeQueueSize) {
       if (this.blockingPromise) {
         throw new Error("Blocking promise already exists");
       }
+      // Create a promise that will be resolved when the queue has drained.
       this.blockingPromise = new Promise(resolve => {
         this.blockingPromiseResolve = resolve;
       });
       (0,_logging_js__WEBPACK_IMPORTED_MODULE_0__.verboseLog)(`Blocking until queue size is reduced: ${this.encoder.encodeQueueSize}`);
       await this.blockingPromise;
     }
+    // Encode the frame and then close it to free up resources.
     (0,_logging_js__WEBPACK_IMPORTED_MODULE_0__.verboseLog)("Encoding frame:", frame);
     this.encoder.encode(frame);
     frame.close();
   }
+
+  /**
+   * Finalizes the encoding process. This method flushes any remaining frames
+   * from the encoder and muxer, and then prepares the final video file for
+   * download. The method of providing the file depends on whether the file
+   * system or in-memory storage was used.
+   */
   async finalize() {
+    // Flush any buffered frames from the encoder and close it.
     await this.encoder.flush();
     this.encoder.close();
     this.muxer.finalize();
+
+    // If using the file system, finalize the file and provide a download link.
     if (this.fileWorker) {
       this.fileWorker.postMessage({
         type: "close"
       });
+      // Wait for the file worker to confirm that the file has been closed.
       await new Promise(resolve => {
         this.fileWorker.onmessage = e => {
           if (e.data.type === "closed") {
@@ -9574,18 +9925,23 @@ class VideoEncoder {
           }
         };
       });
+
+      // Get a handle to the temporary file and create a URL for it.
       const root = await navigator.storage.getDirectory();
       const fileHandle = await root.getFileHandle(this.tempFileName, {
         create: false
       });
       const file = await fileHandle.getFile();
       const url = URL.createObjectURL(file);
+
+      // Create a link to download the file.
       const a = document.createElement("a");
       a.href = url;
       a.download = "processed-video.mp4";
       a.click();
       URL.revokeObjectURL(url);
     } else {
+      // If using in-memory storage, assemble the video from the stored chunks.
       const sortedChunks = this.chunks.sort((a, b) => a.position - b.position);
       const lastChunk = sortedChunks[sortedChunks.length - 1];
       const totalSize = lastChunk.position + lastChunk.data.length;
@@ -9593,6 +9949,8 @@ class VideoEncoder {
       for (const chunk of sortedChunks) {
         result.set(chunk.data, chunk.position);
       }
+
+      // Create a Blob from the video data and provide a download link.
       const blob = new Blob([result], {
         type: "video/mp4"
       });
@@ -9619,20 +9977,36 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
 /* harmony export */   VideoFrameRenderer: () => (/* binding */ VideoFrameRenderer)
 /* harmony export */ });
+/**
+ * Handles the rendering of video frames to a canvas, including transformations
+ * like zooming and rotation.
+ */
 class VideoFrameRenderer {
+  /**
+   * Initializes the renderer with a 2D canvas context.
+   * @param {CanvasRenderingContext2D} ctx - The canvas rendering context.
+   */
   constructor(ctx) {
     this.ctx = ctx;
     this.matrix = null;
     this.width = 0;
     this.height = 0;
-    this.scale = 1.0;
+    this.zoom = 1.0;
     this.rotation = 0; // Video rotation in degrees
   }
-  setup(width, height, matrix, scale = 1.0) {
+
+  /**
+   * Sets up the renderer with video dimensions, matrix, and initial zoom.
+   * @param {number} width - The width of the video.
+   * @param {number} height - The height of the video.
+   * @param {Array<number>} matrix - The transformation matrix of the video.
+   * @param {number} [zoom=1.0] - The initial zoom factor.
+   */
+  setup(width, height, matrix, zoom = 1.0) {
     this.width = width;
     this.height = height;
     this.matrix = matrix;
-    this.scale = scale;
+    this.zoom = zoom;
   }
 
   /**
@@ -9644,7 +10018,7 @@ class VideoFrameRenderer {
   }
 
   /**
-   * Draws a video frame to the canvas, applying scaling and rotation.
+   * Draws a video frame to the canvas, applying zoom and rotation.
    * @param {VideoFrame} frame - The video frame to draw.
    */
   drawFrame(frame) {
@@ -9656,13 +10030,13 @@ class VideoFrameRenderer {
     this.ctx.translate(canvasWidth / 2, canvasHeight / 2);
     this.ctx.rotate(this.rotation * Math.PI / 180);
 
-    // Calculate the crop dimensions based on the scale
-    const cropWidth = this.width * this.scale;
-    const cropHeight = this.height * this.scale;
+    // Calculate the crop dimensions based on the zoom
+    const cropWidth = this.width * this.zoom;
+    const cropHeight = this.height * this.zoom;
     const cropX = (this.width - cropWidth) / 2;
     const cropY = (this.height - cropHeight) / 2;
 
-    // Draw the frame, cropped and scaled, centered on the canvas
+    // Draw the frame, cropped and zoomed, centered on the canvas
     this.ctx.drawImage(frame, cropX, cropY, cropWidth, cropHeight, -cropWidth / 2,
     // Draw at the center of the rotated canvas
     -cropHeight / 2,
@@ -9745,7 +10119,7 @@ class VideoProcessor {
     // Preview-related properties
     this.previewManager = null; // Will hold PreviewManager instance
     this.lastPreviewPercentage = 0.0;
-    this.scale = 1.0; // Add scale property
+    this.zoom = 1.0; // Add zoom property
     this.rotation = 0; // Add rotation property
     this.fps = 0;
     this.videoWidth = 0;
@@ -9790,18 +10164,18 @@ class VideoProcessor {
   }
 
   /**
-   * Updates the scale of the video.
-   * @param {number} scale - The new scale value.
+   * Updates the zoom of the video.
+   * @param {number} zoom - The new zoom value.
    */
-  async updateScale(scale) {
-    this.scale = scale;
+  async updateZoom(zoom) {
+    this.zoom = zoom;
     const {
       width,
       height
     } = this.getCanvasDimensions();
     this.setupCanvas(width, height);
     // Update frame renderer
-    this.frameRenderer.setup(this.videoWidth, this.videoHeight, this.matrix, scale);
+    this.frameRenderer.setup(this.videoWidth, this.videoHeight, this.matrix, zoom);
 
     // If in preview mode, update the preview
     if (this.state === "initialized") {
@@ -10001,7 +10375,7 @@ class VideoProcessor {
     } = this.getCanvasDimensions();
     this.setupCanvas(width, height);
     this.fps = config.fps;
-    this.frameRenderer.setup(config.codedWidth, config.codedHeight, config.matrix, this.scale);
+    this.frameRenderer.setup(config.codedWidth, config.codedHeight, config.matrix, this.zoom);
     this.mp4StartTime = config.startTime;
     this.frame_count = 0;
     this.frameCountDisplay.textContent = `Processed frames: 0 / ${this.nb_samples}`;
@@ -10029,8 +10403,8 @@ class VideoProcessor {
   }
   getCanvasDimensions() {
     const isSideways = this.rotation % 180 !== 0;
-    const width = isSideways ? this.videoHeight * this.scale : this.videoWidth * this.scale;
-    const height = isSideways ? this.videoWidth * this.scale : this.videoHeight * this.scale;
+    const width = isSideways ? this.videoHeight * this.zoom : this.videoWidth * this.zoom;
+    const height = isSideways ? this.videoWidth * this.zoom : this.videoHeight * this.zoom;
     return {
       width,
       height
@@ -10038,8 +10412,8 @@ class VideoProcessor {
   }
   getEncoderDimensions() {
     const isSideways = this.rotation % 180 !== 0;
-    const width = Math.ceil((isSideways ? this.videoHeight : this.videoWidth) * this.scale / 64) * 64;
-    const height = Math.ceil((isSideways ? this.videoWidth : this.videoHeight) * this.scale / 64) * 64;
+    const width = Math.ceil((isSideways ? this.videoHeight : this.videoWidth) * this.zoom / 64) * 64;
+    const height = Math.ceil((isSideways ? this.videoWidth : this.videoHeight) * this.zoom / 64) * 64;
     return {
       width,
       height
@@ -12175,7 +12549,7 @@ __webpack_require__.r(__webpack_exports__);
 
 
 
-// Initialize the slider
+// Initialize the slider, time range, and timestamp providers.
 const frameRangeSlider = new _frameRangeSlider_js__WEBPACK_IMPORTED_MODULE_3__.FrameRangeSlider();
 const timeRangeProvider = new _timeRangeProvider_js__WEBPACK_IMPORTED_MODULE_1__.TimeRangeProvider({
   startTimeInput: document.getElementById("startTime"),
@@ -12188,24 +12562,24 @@ const timestampProvider = new _timeStampProvider_js__WEBPACK_IMPORTED_MODULE_0__
 });
 let processor = null;
 
-// Event listener for file input
+/**
+ * Event listener for the video input file selection.
+ * Initializes the VideoProcessor with the selected file and sets up callbacks.
+ */
 document.getElementById("videoInput").addEventListener("change", async e => {
   const file = e.target.files[0];
   if (!file) {
     document.getElementById("processButton").disabled = true;
     return;
   }
-
-  // Initialize slider when video is loaded
   if (file) {
-    // You'll need to get the total frame count from your video processing logic
-    // This might need to be moved to after the video metadata is loaded
-    frameRangeSlider.initialize(0); // Initially set to 0, update when frame count is known
+    // Reset processor if it exists
     if (processor != null) {
       if (processor.isProcessing) {
         await processor.waitForProcessing();
       }
     }
+    // Initialize the video processor
     processor = new _videoProcessor_js__WEBPACK_IMPORTED_MODULE_2__.VideoProcessor({
       canvas: document.getElementById("processorCanvas"),
       statusElement: document.getElementById("status"),
@@ -12213,10 +12587,13 @@ document.getElementById("videoInput").addEventListener("change", async e => {
       timestampProvider: timestampProvider,
       frameRangeSlider: frameRangeSlider
     });
+
+    // Set up a callback for when the processor is initialized
     processor.onInitialized = nb_samples => {
       frameRangeSlider.initialize(nb_samples);
-      // Enable the process button when processing is initialized
       document.getElementById("processButton").disabled = false;
+
+      // Set up a callback for slider updates
       frameRangeSlider.onupdatepercentage = percentage => {
         processor.renderSampleInPercentage(percentage);
       };
@@ -12225,7 +12602,10 @@ document.getElementById("videoInput").addEventListener("change", async e => {
   }
 });
 
-// Add process button click handler
+/**
+ * Event listener for the process button.
+ * Starts video processing based on the selected mode (slider or time range).
+ */
 document.getElementById("processButton").addEventListener("click", async () => {
   const file = document.getElementById("videoInput").files[0];
   if (!file) return;
@@ -12252,23 +12632,30 @@ document.getElementById("processButton").addEventListener("click", async () => {
   }
 });
 
-// Add scale slider event listener
-document.getElementById("scaleSlider").addEventListener("input", async e => {
-  const scale = e.target.value / 100;
-  document.getElementById("scaleValue").textContent = `${e.target.value}%`;
+/**
+ * Event listener for the zoom slider.
+ * Updates the video zoom in the processor.
+ */
+document.getElementById("zoomSlider").addEventListener("input", async e => {
+  const zoom = e.target.value / 100;
+  document.getElementById("zoomValue").textContent = `${e.target.value}%`;
   if (processor && processor.state === "initialized") {
-    await processor.updateScale(scale);
+    await processor.updateZoom(zoom);
   }
 });
 
-// Event listener for clockwise rotation button
+/**
+ * Event listener for the clockwise rotation button.
+ */
 document.getElementById("rotateCW").addEventListener("click", async () => {
   if (processor) {
     await processor.updateRotation((processor.rotation + 90) % 360);
   }
 });
 
-// Event listener for counter-clockwise rotation button
+/**
+ * Event listener for the counter-clockwise rotation button.
+ */
 document.getElementById("rotateCCW").addEventListener("click", async () => {
   if (processor) {
     await processor.updateRotation((processor.rotation - 90 + 360) % 360);
