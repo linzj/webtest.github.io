@@ -8995,6 +8995,8 @@ class ProcessingPipeline {
     this.decoder = null;
     this.encoder = null;
     this.state = "idle"; // 'idle', 'ready', 'processing', 'exhausted', 'finalized'
+    this.processingResolve = null;
+    this.processingPromise = null;
     this.outputTaskPromises = [];
     this.previousPromise = Promise.resolve();
     this.timeRangeStart = 0;
@@ -9066,7 +9068,7 @@ class ProcessingPipeline {
    * @param {number} timeRangeStart - The start of the processing time range in ms.
    * @param {number} timeRangeEnd - The end of the processing time range in ms.
    */
-  start(timeRangeStart, timeRangeEnd) {
+  async start(timeRangeStart, timeRangeEnd) {
     if (this.state !== "ready") {
       throw new Error("Pipeline is not ready to start processing.");
     }
@@ -9075,6 +9077,10 @@ class ProcessingPipeline {
     this.state = "processing";
     this.timerDispatch();
     this.dispatch(_logging_js__WEBPACK_IMPORTED_MODULE_0__.kDecodeQueueSize);
+    this.processingPromise = new Promise(resolve => {
+      this.processingResolve = resolve;
+    });
+    return this.processingPromise;
   }
 
   /**
@@ -9186,6 +9192,9 @@ class ProcessingPipeline {
     this.state = "finalized";
     await this.encoder.finalize();
     this.onFinalized();
+    if (this.processingResolve) {
+      this.processingResolve();
+    }
   }
 }
 
@@ -10668,7 +10677,7 @@ class VideoProcessor {
       this.processingResolve = resolve;
     });
     try {
-      this.pipeline.start(this.timeRangeStart, this.timeRangeEnd);
+      await this.pipeline.start(this.timeRangeStart, this.timeRangeEnd);
     } catch (error) {
       console.error("Error processing video:", error);
       this.uiManager.setStatus("error", error.message);
