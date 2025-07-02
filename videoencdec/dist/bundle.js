@@ -9458,6 +9458,7 @@ class SampleManager {
   resetForReprocessing() {
     this.currentIndex = 0;
     this.finalized = false;
+    this.sample = this.originalSamples;
   }
 }
 
