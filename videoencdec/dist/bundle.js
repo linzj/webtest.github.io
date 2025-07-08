@@ -8671,6 +8671,232 @@ if (true) {
 
 /***/ }),
 
+/***/ "./errorHandler.js":
+/*!*************************!*\
+  !*** ./errorHandler.js ***!
+  \*************************/
+/***/ ((__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) => {
+
+"use strict";
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   ErrorHandler: () => (/* binding */ ErrorHandler)
+/* harmony export */ });
+/**
+ * Centralized error handling for the video processing application.
+ * Provides consistent error handling, logging, and user feedback.
+ */
+class ErrorHandler {
+  constructor(uiManager) {
+    this.uiManager = uiManager;
+    this.errorCount = 0;
+    this.maxRetries = 3;
+  }
+
+  /**
+   * Handles errors with appropriate logging and user feedback.
+   * @param {Error} error - The error object
+   * @param {string} context - The context where the error occurred
+   * @param {Object} options - Additional options for error handling
+   * @param {boolean} options.showToUser - Whether to show error to user
+   * @param {boolean} options.retry - Whether to retry the operation
+   * @param {Function} options.retryFunction - Function to retry
+   */
+  async handleError(error, context, options = {}) {
+    const {
+      showToUser = true,
+      retry = false,
+      retryFunction = null,
+      critical = false
+    } = options;
+
+    // Log the error
+    this.logError(error, context);
+
+    // Show user-friendly message if requested
+    if (showToUser) {
+      this.showUserError(error, context, critical);
+    }
+
+    // Handle retry logic
+    if (retry && retryFunction && this.errorCount < this.maxRetries) {
+      this.errorCount++;
+      console.log(`Retrying operation (attempt ${this.errorCount}/${this.maxRetries})`);
+      try {
+        await new Promise(resolve => setTimeout(resolve, 1000 * this.errorCount)); // Exponential backoff
+        return await retryFunction();
+      } catch (retryError) {
+        return this.handleError(retryError, context, options);
+      }
+    }
+
+    // Reset error count on success or max retries reached
+    if (!retry || this.errorCount >= this.maxRetries) {
+      this.errorCount = 0;
+    }
+
+    // Re-throw critical errors
+    if (critical) {
+      throw error;
+    }
+    return null;
+  }
+
+  /**
+   * Logs error details for debugging.
+   * @param {Error} error - The error object
+   * @param {string} context - The context where the error occurred
+   */
+  logError(error, context) {
+    const errorInfo = {
+      message: error.message,
+      stack: error.stack,
+      context: context,
+      timestamp: new Date().toISOString(),
+      userAgent: navigator.userAgent
+    };
+    console.error("Video Processing Error:", errorInfo);
+
+    // In a production environment, you might want to send this to a logging service
+    if (typeof window !== "undefined" && window.gtag) {
+      window.gtag("event", "exception", {
+        description: `${context}: ${error.message}`,
+        fatal: false
+      });
+    }
+  }
+
+  /**
+   * Shows user-friendly error messages.
+   * @param {Error} error - The error object
+   * @param {string} context - The context where the error occurred
+   * @param {boolean} critical - Whether this is a critical error
+   */
+  showUserError(error, context, critical = false) {
+    const userMessage = this.getUserFriendlyMessage(error, context);
+    if (this.uiManager) {
+      this.uiManager.setStatus("error", userMessage);
+    } else {
+      // Fallback to alert if no UI manager
+      alert(`Error: ${userMessage}`);
+    }
+
+    // For critical errors, show additional notification
+    if (critical) {
+      console.error("Critical error occurred:", error);
+    }
+  }
+
+  /**
+   * Converts technical error messages to user-friendly messages.
+   * @param {Error} error - The error object
+   * @param {string} context - The context where the error occurred
+   * @returns {string} - User-friendly error message
+   */
+  getUserFriendlyMessage(error, context) {
+    const errorMessage = error.message.toLowerCase();
+
+    // Common error patterns and their user-friendly messages
+    if (errorMessage.includes("not supported") || errorMessage.includes("unsupported")) {
+      return "This video format is not supported. Please try a different video file.";
+    }
+    if (errorMessage.includes("network") || errorMessage.includes("fetch")) {
+      return "Network error occurred. Please check your internet connection and try again.";
+    }
+    if (errorMessage.includes("memory") || errorMessage.includes("out of memory")) {
+      return "The video file is too large to process. Please try a smaller video file.";
+    }
+    if (errorMessage.includes("permission") || errorMessage.includes("access")) {
+      return "Permission denied. Please check your browser settings and try again.";
+    }
+    if (errorMessage.includes("timeout")) {
+      return "Operation timed out. Please try again with a shorter video segment.";
+    }
+    if (errorMessage.includes("codec") || errorMessage.includes("encoding")) {
+      return "Video encoding error. Please try a different video format.";
+    }
+
+    // Default message based on context
+    const contextMessages = {
+      "file loading": "Failed to load video file. Please check the file and try again.",
+      decoding: "Failed to decode video. The file may be corrupted or unsupported.",
+      encoding: "Failed to encode video. Please try different settings.",
+      processing: "Video processing failed. Please try again.",
+      preview: "Failed to generate preview. Please try again.",
+      initialization: "Failed to initialize video processor. Please refresh the page and try again."
+    };
+    return contextMessages[context] || "An unexpected error occurred. Please try again.";
+  }
+
+  /**
+   * Validates video file before processing.
+   * @param {File} file - The video file to validate
+   * @returns {Object} - Validation result with isValid and error properties
+   */
+  validateVideoFile(file) {
+    if (!file) {
+      return {
+        isValid: false,
+        error: "No file selected"
+      };
+    }
+    if (!file.type.startsWith("video/")) {
+      return {
+        isValid: false,
+        error: "Selected file is not a video"
+      };
+    }
+    const maxSize = 500 * 1024 * 1024; // 500MB
+    if (file.size > maxSize) {
+      return {
+        isValid: false,
+        error: "Video file is too large (max 500MB)"
+      };
+    }
+    const supportedTypes = ["video/mp4", "video/webm", "video/ogg", "video/quicktime", "video/x-msvideo"];
+    if (!supportedTypes.includes(file.type)) {
+      return {
+        isValid: false,
+        error: "Video format not supported"
+      };
+    }
+    return {
+      isValid: true,
+      error: null
+    };
+  }
+
+  /**
+   * Checks if the browser supports required features.
+   * @returns {Object} - Support check result with supported and missingFeatures properties
+   */
+  checkBrowserSupport() {
+    const missingFeatures = [];
+    if (!window.VideoDecoder) {
+      missingFeatures.push("VideoDecoder API");
+    }
+    if (!window.VideoEncoder) {
+      missingFeatures.push("VideoEncoder API");
+    }
+    if (!window.VideoFrame) {
+      missingFeatures.push("VideoFrame API");
+    }
+    if (!window.EncodedVideoChunk) {
+      missingFeatures.push("EncodedVideoChunk API");
+    }
+    const supported = missingFeatures.length === 0;
+    if (!supported) {
+      console.error("Missing browser features:", missingFeatures);
+    }
+    return {
+      supported,
+      missingFeatures
+    };
+  }
+}
+
+/***/ }),
+
 /***/ "./frameRangeSlider.js":
 /*!*****************************!*\
   !*** ./frameRangeSlider.js ***!
@@ -8837,27 +9063,240 @@ class FrameRangeSlider {
 "use strict";
 __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   LogConfig: () => (/* binding */ LogConfig),
+/* harmony export */   LogLevel: () => (/* binding */ LogLevel),
+/* harmony export */   debugLog: () => (/* binding */ debugLog),
+/* harmony export */   errorLog: () => (/* binding */ errorLog),
+/* harmony export */   infoLog: () => (/* binding */ infoLog),
 /* harmony export */   kDecodeQueueSize: () => (/* binding */ kDecodeQueueSize),
-/* harmony export */   kEnablePerformanceLogging: () => (/* binding */ kEnablePerformanceLogging),
-/* harmony export */   kEnableVerboseLogging: () => (/* binding */ kEnableVerboseLogging),
 /* harmony export */   kEncodeQueueSize: () => (/* binding */ kEncodeQueueSize),
+/* harmony export */   logger: () => (/* binding */ logger),
 /* harmony export */   performanceLog: () => (/* binding */ performanceLog),
-/* harmony export */   verboseLog: () => (/* binding */ verboseLog)
+/* harmony export */   verboseLog: () => (/* binding */ verboseLog),
+/* harmony export */   warnLog: () => (/* binding */ warnLog)
 /* harmony export */ });
 const kEncodeQueueSize = 23;
 const kDecodeQueueSize = kEncodeQueueSize;
-const kEnableVerboseLogging = false;
-const kEnablePerformanceLogging = true;
-function verboseLog() {
-  if (kEnableVerboseLogging) {
-    console.log.apply(console, arguments);
+
+// Logging configuration
+const LogLevel = {
+  ERROR: 0,
+  WARN: 1,
+  INFO: 2,
+  DEBUG: 3,
+  VERBOSE: 4
+};
+const LogConfig = {
+  level: LogLevel.INFO,
+  enablePerformanceLogging: true,
+  enableConsoleOutput: true,
+  enableFileOutput: false,
+  maxLogEntries: 1000
+};
+class Logger {
+  constructor() {
+    this.logEntries = [];
+    this.performanceMetrics = new Map();
+  }
+
+  /**
+   * Logs a message with the specified level.
+   * @param {number} level - The log level
+   * @param {string} context - The context where the log was generated
+   * @param {string} message - The log message
+   * @param {Object} data - Additional data to log
+   */
+  log(level, context, message, data = null) {
+    if (level > LogConfig.level) {
+      return;
+    }
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      level: this.getLevelName(level),
+      context,
+      message,
+      data,
+      performance: performance.now()
+    };
+    this.logEntries.push(logEntry);
+
+    // Keep only the last maxLogEntries
+    if (this.logEntries.length > LogConfig.maxLogEntries) {
+      this.logEntries.shift();
+    }
+
+    // Console output
+    if (LogConfig.enableConsoleOutput) {
+      this.outputToConsole(logEntry);
+    }
+
+    // File output (if enabled)
+    if (LogConfig.enableFileOutput) {
+      this.outputToFile(logEntry);
+    }
+  }
+
+  /**
+   * Gets the name of a log level.
+   * @param {number} level - The log level
+   * @returns {string} - The level name
+   */
+  getLevelName(level) {
+    const names = ["ERROR", "WARN", "INFO", "DEBUG", "VERBOSE"];
+    return names[level] || "UNKNOWN";
+  }
+
+  /**
+   * Outputs a log entry to the console.
+   * @param {Object} logEntry - The log entry
+   */
+  outputToConsole(logEntry) {
+    const {
+      level,
+      context,
+      message,
+      data
+    } = logEntry;
+    const prefix = `[${level}] [${context}]`;
+    switch (level) {
+      case "ERROR":
+        console.error(prefix, message, data || "");
+        break;
+      case "WARN":
+        console.warn(prefix, message, data || "");
+        break;
+      case "INFO":
+        console.info(prefix, message, data || "");
+        break;
+      case "DEBUG":
+      case "VERBOSE":
+        console.log(prefix, message, data || "");
+        break;
+    }
+  }
+
+  /**
+   * Outputs a log entry to a file (placeholder for future implementation).
+   * @param {Object} logEntry - The log entry
+   */
+  outputToFile(logEntry) {
+    // TODO: Implement file logging
+    // This could write to IndexedDB or send to a logging service
+  }
+
+  /**
+   * Records a performance metric.
+   * @param {string} name - The metric name
+   * @param {number} value - The metric value
+   * @param {string} unit - The unit of measurement
+   */
+  recordPerformance(name, value, unit = "ms") {
+    if (!LogConfig.enablePerformanceLogging) {
+      return;
+    }
+    if (!this.performanceMetrics.has(name)) {
+      this.performanceMetrics.set(name, []);
+    }
+    this.performanceMetrics.get(name).push({
+      value,
+      unit,
+      timestamp: Date.now()
+    });
+
+    // Keep only the last 100 measurements per metric
+    const metrics = this.performanceMetrics.get(name);
+    if (metrics.length > 100) {
+      metrics.shift();
+    }
+  }
+
+  /**
+   * Gets performance statistics for a metric.
+   * @param {string} name - The metric name
+   * @returns {Object} - Performance statistics
+   */
+  getPerformanceStats(name) {
+    const metrics = this.performanceMetrics.get(name);
+    if (!metrics || metrics.length === 0) {
+      return null;
+    }
+    const values = metrics.map(m => m.value);
+    const sum = values.reduce((a, b) => a + b, 0);
+    const avg = sum / values.length;
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    return {
+      name,
+      count: values.length,
+      average: avg,
+      min,
+      max,
+      total: sum
+    };
+  }
+
+  /**
+   * Gets all log entries.
+   * @returns {Array} - All log entries
+   */
+  getLogEntries() {
+    return [...this.logEntries];
+  }
+
+  /**
+   * Clears all log entries.
+   */
+  clearLogs() {
+    this.logEntries = [];
+  }
+
+  /**
+   * Exports logs as JSON.
+   * @returns {string} - JSON string of logs
+   */
+  exportLogs() {
+    return JSON.stringify({
+      logs: this.logEntries,
+      performance: Object.fromEntries(this.performanceMetrics),
+      config: LogConfig
+    }, null, 2);
   }
 }
-function performanceLog(message) {
-  if (kEnablePerformanceLogging) {
-    alert(message);
+
+// Create singleton logger instance
+const logger = new Logger();
+
+// Export convenience functions
+function errorLog(context, message, data = null) {
+  logger.log(LogLevel.ERROR, context, message, data);
+}
+function warnLog(context, message, data = null) {
+  logger.log(LogLevel.WARN, context, message, data);
+}
+function infoLog(context, message, data = null) {
+  logger.log(LogLevel.INFO, context, message, data);
+}
+function debugLog(context, message, data = null) {
+  logger.log(LogLevel.DEBUG, context, message, data);
+}
+function verboseLog(context, message, data = null) {
+  logger.log(LogLevel.VERBOSE, context, message, data);
+}
+function performanceLog(context, message, duration = null) {
+  if (duration !== null) {
+    logger.recordPerformance(context, duration);
+  }
+  if (LogConfig.enablePerformanceLogging) {
+    const stats = logger.getPerformanceStats(context);
+    if (stats) {
+      message += ` (avg: ${stats.average.toFixed(2)}ms, min: ${stats.min}ms, max: ${stats.max}ms)`;
+    }
+    logger.log(LogLevel.INFO, "PERFORMANCE", message);
   }
 }
+
+// Export logger instance for advanced usage
+
 
 /***/ }),
 
@@ -8960,6 +9399,8 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var _logging_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./logging.js */ "./logging.js");
 /* harmony import */ var _videoEncoder_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ./videoEncoder.js */ "./videoEncoder.js");
 /* harmony import */ var _videoDecoder_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ./videoDecoder.js */ "./videoDecoder.js");
+/* harmony import */ var _resourceManager_js__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! ./resourceManager.js */ "./resourceManager.js");
+
 
 
 
@@ -9001,6 +9442,10 @@ class ProcessingPipeline {
     this.previousPromise = Promise.resolve();
     this.timeRangeStart = 0;
     this.timeRangeEnd = 0;
+
+    // Initialize resource manager
+    this.resourceManager = new _resourceManager_js__WEBPACK_IMPORTED_MODULE_3__.ResourceManager();
+    (0,_logging_js__WEBPACK_IMPORTED_MODULE_0__.infoLog)("ProcessingPipeline", "Processing pipeline initialized");
   }
 
   /**
@@ -9019,14 +9464,22 @@ class ProcessingPipeline {
    * @private
    */
   async setupDecoder(config) {
-    this.decoder = new _videoDecoder_js__WEBPACK_IMPORTED_MODULE_2__.VideoDecoder({
-      onFrame: frame => this.handleDecoderOutput(frame),
-      onError: e => console.error(e),
-      onDequeue: n => this.dispatch(n),
-      isChromeBased: this.isChromeBased
-    });
-    await this.decoder.setup(config);
-    this.uiManager.setStatus("decode", "Decoder configured");
+    try {
+      this.decoder = new _videoDecoder_js__WEBPACK_IMPORTED_MODULE_2__.VideoDecoder({
+        onFrame: frame => this.handleDecoderOutput(frame),
+        onError: e => {
+          (0,_logging_js__WEBPACK_IMPORTED_MODULE_0__.errorLog)("ProcessingPipeline", "Decoder error", e);
+        },
+        onDequeue: n => this.dispatch(n),
+        isChromeBased: this.isChromeBased
+      });
+      await this.decoder.setup(config);
+      this.uiManager.setStatus("decode", "Decoder configured");
+      (0,_logging_js__WEBPACK_IMPORTED_MODULE_0__.infoLog)("ProcessingPipeline", "Decoder setup complete");
+    } catch (error) {
+      (0,_logging_js__WEBPACK_IMPORTED_MODULE_0__.errorLog)("ProcessingPipeline", "Failed to setup decoder", error);
+      throw error;
+    }
   }
 
   /**
@@ -9141,7 +9594,11 @@ class ProcessingPipeline {
     }
     // In any other state, we just close the frame.
     // Preview frames are handled by the VideoProcessor, not this pipeline.
-    frame.close();
+    this.resourceManager.closeFrame({
+      frame,
+      context: "pipeline",
+      closed: false
+    });
   }
 
   /**
@@ -9157,7 +9614,11 @@ class ProcessingPipeline {
   async processFrame(frame) {
     const frameTimeMs = Math.floor(frame.timestamp / 1000);
     if (frameTimeMs < this.timeRangeStart || frameTimeMs > this.timeRangeEnd) {
-      frame.close();
+      this.resourceManager.closeFrame({
+        frame,
+        context: "pipeline-out-of-range",
+        closed: false
+      });
       return;
     }
     try {
@@ -9194,6 +9655,276 @@ class ProcessingPipeline {
     this.onFinalized();
     if (this.processingResolve) {
       this.processingResolve();
+    }
+  }
+}
+
+/***/ }),
+
+/***/ "./resourceManager.js":
+/*!****************************!*\
+  !*** ./resourceManager.js ***!
+  \****************************/
+/***/ ((__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) => {
+
+"use strict";
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   ResourceManager: () => (/* binding */ ResourceManager)
+/* harmony export */ });
+/**
+ * Manages video resources to prevent memory leaks and ensure proper cleanup.
+ * Handles VideoFrame objects, canvas contexts, and other video-related resources.
+ */
+class ResourceManager {
+  constructor() {
+    this.activeFrames = new Set();
+    this.framePool = [];
+    this.maxPoolSize = 10;
+    this.cleanupCallbacks = [];
+    this.isShuttingDown = false;
+  }
+
+  /**
+   * Registers a VideoFrame for tracking and automatic cleanup.
+   * @param {VideoFrame} frame - The VideoFrame to track
+   * @param {string} context - Context where the frame was created
+   */
+  registerFrame(frame, context = "unknown") {
+    if (!frame || this.isShuttingDown) {
+      return;
+    }
+    const frameInfo = {
+      frame,
+      context,
+      timestamp: Date.now(),
+      closed: false
+    };
+    this.activeFrames.add(frameInfo);
+
+    // Add a weak reference cleanup
+    const cleanup = () => {
+      this.closeFrame(frameInfo);
+    };
+
+    // Store cleanup callback
+    this.cleanupCallbacks.push(cleanup);
+
+    // Log frame registration in development
+    if (true) {
+      console.log(`Frame registered: ${context} (active: ${this.activeFrames.size})`);
+    }
+  }
+
+  /**
+   * Closes a VideoFrame and removes it from tracking.
+   * @param {Object} frameInfo - The frame info object
+   */
+  closeFrame(frameInfo) {
+    if (!frameInfo || frameInfo.closed) {
+      return;
+    }
+    try {
+      if (frameInfo.frame && typeof frameInfo.frame.close === "function") {
+        frameInfo.frame.close();
+      }
+      frameInfo.closed = true;
+      this.activeFrames.delete(frameInfo);
+    } catch (error) {
+      console.error("Error closing frame:", error);
+    }
+
+    // Log frame closure in development
+    if (true) {
+      console.log(`Frame closed: ${frameInfo.context} (active: ${this.activeFrames.size})`);
+    }
+  }
+
+  /**
+   * Closes all active frames.
+   */
+  closeAllFrames() {
+    const framesToClose = Array.from(this.activeFrames);
+    framesToClose.forEach(frameInfo => {
+      this.closeFrame(frameInfo);
+    });
+    console.log(`Closed ${framesToClose.length} active frames`);
+  }
+
+  /**
+   * Gets a frame from the pool or creates a new one.
+   * @param {Function} createFrame - Function to create a new frame
+   * @returns {VideoFrame} - The frame
+   */
+  getFrameFromPool(createFrame) {
+    if (this.framePool.length > 0) {
+      const frame = this.framePool.pop();
+      this.registerFrame(frame, "pool");
+      return frame;
+    }
+    const newFrame = createFrame();
+    this.registerFrame(newFrame, "new");
+    return newFrame;
+  }
+
+  /**
+   * Returns a frame to the pool for reuse.
+   * @param {VideoFrame} frame - The frame to return to pool
+   */
+  returnFrameToPool(frame) {
+    if (!frame || this.framePool.length >= this.maxPoolSize) {
+      this.closeFrame({
+        frame,
+        context: "pool-return",
+        closed: false
+      });
+      return;
+    }
+
+    // Reset frame state if needed
+    if (frame.codedWidth && frame.codedHeight) {
+      this.framePool.push(frame);
+    } else {
+      this.closeFrame({
+        frame,
+        context: "pool-return",
+        closed: false
+      });
+    }
+  }
+
+  /**
+   * Cleans up old frames that have been active for too long.
+   * @param {number} maxAgeMs - Maximum age in milliseconds (default: 30 seconds)
+   */
+  cleanupOldFrames(maxAgeMs = 30000) {
+    const now = Date.now();
+    const framesToClose = [];
+    this.activeFrames.forEach(frameInfo => {
+      if (now - frameInfo.timestamp > maxAgeMs) {
+        framesToClose.push(frameInfo);
+      }
+    });
+    framesToClose.forEach(frameInfo => {
+      this.closeFrame(frameInfo);
+    });
+    if (framesToClose.length > 0) {
+      console.log(`Cleaned up ${framesToClose.length} old frames`);
+    }
+  }
+
+  /**
+   * Gets statistics about resource usage.
+   * @returns {Object} - Resource statistics
+   */
+  getStats() {
+    return {
+      activeFrames: this.activeFrames.size,
+      poolSize: this.framePool.length,
+      maxPoolSize: this.maxPoolSize,
+      isShuttingDown: this.isShuttingDown
+    };
+  }
+
+  /**
+   * Sets up periodic cleanup to prevent memory leaks.
+   * @param {number} intervalMs - Cleanup interval in milliseconds (default: 10 seconds)
+   */
+  startPeriodicCleanup(intervalMs = 10000) {
+    this.cleanupInterval = setInterval(() => {
+      this.cleanupOldFrames();
+    }, intervalMs);
+  }
+
+  /**
+   * Stops periodic cleanup.
+   */
+  stopPeriodicCleanup() {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+    }
+  }
+
+  /**
+   * Shuts down the resource manager and cleans up all resources.
+   */
+  shutdown() {
+    this.isShuttingDown = true;
+    this.stopPeriodicCleanup();
+    this.closeAllFrames();
+
+    // Clear the pool
+    this.framePool.forEach(frame => {
+      try {
+        if (frame && typeof frame.close === "function") {
+          frame.close();
+        }
+      } catch (error) {
+        console.error("Error closing pooled frame:", error);
+      }
+    });
+    this.framePool = [];
+
+    // Execute cleanup callbacks
+    this.cleanupCallbacks.forEach(callback => {
+      try {
+        callback();
+      } catch (error) {
+        console.error("Error in cleanup callback:", error);
+      }
+    });
+    this.cleanupCallbacks = [];
+    console.log("Resource manager shutdown complete");
+  }
+
+  /**
+   * Creates a safe wrapper for frame operations that ensures cleanup.
+   * @param {Function} operation - The operation to perform with the frame
+   * @param {string} context - Context for the operation
+   * @returns {Promise} - Promise that resolves when operation is complete
+   */
+  async withFrame(operation, context = "operation") {
+    let frame = null;
+    try {
+      frame = await operation();
+      if (frame) {
+        this.registerFrame(frame, context);
+      }
+      return frame;
+    } catch (error) {
+      if (frame) {
+        this.closeFrame({
+          frame,
+          context,
+          closed: false
+        });
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Safely processes a frame and ensures it's closed afterward.
+   * @param {VideoFrame} frame - The frame to process
+   * @param {Function} processor - The processing function
+   * @param {string} context - Context for the processing
+   * @returns {Promise} - Promise that resolves with the processing result
+   */
+  async processFrame(frame, processor, context = "processing") {
+    if (!frame) {
+      throw new Error("No frame provided for processing");
+    }
+    this.registerFrame(frame, context);
+    try {
+      const result = await processor(frame);
+      return result;
+    } finally {
+      this.closeFrame({
+        frame,
+        context,
+        closed: false
+      });
     }
   }
 }
@@ -10497,6 +11228,12 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var _previewManager_js__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! ./previewManager.js */ "./previewManager.js");
 /* harmony import */ var _uiManager_js__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(/*! ./uiManager.js */ "./uiManager.js");
 /* harmony import */ var _processingPipeline_js__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(/*! ./processingPipeline.js */ "./processingPipeline.js");
+/* harmony import */ var _videoProcessorState_js__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(/*! ./videoProcessorState.js */ "./videoProcessorState.js");
+/* harmony import */ var _errorHandler_js__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(/*! ./errorHandler.js */ "./errorHandler.js");
+/* harmony import */ var _resourceManager_js__WEBPACK_IMPORTED_MODULE_8__ = __webpack_require__(/*! ./resourceManager.js */ "./resourceManager.js");
+
+
+
 
 
 
@@ -10529,14 +11266,15 @@ class VideoProcessor {
       frameCountDisplay,
       timestampProvider
     });
-    this.state = "idle";
-    this.previousPromise = null; // For preview operations
-    this.startProcessVideoTime = undefined;
+
+    // Initialize new systems
+    this.stateManager = new _videoProcessorState_js__WEBPACK_IMPORTED_MODULE_6__.VideoProcessorState();
+    this.errorHandler = new _errorHandler_js__WEBPACK_IMPORTED_MODULE_7__.ErrorHandler(this.uiManager);
+    this.resourceManager = new _resourceManager_js__WEBPACK_IMPORTED_MODULE_8__.ResourceManager();
     this.sampleManager = new _sampleManager_js__WEBPACK_IMPORTED_MODULE_1__.SampleManager();
     this.timestampProvider = timestampProvider;
     this.isChromeBased = navigator.userAgent.toLowerCase().includes("chrome");
-    this.processingPromise = null;
-    this.processingResolve = null;
+    this.startProcessVideoTime = undefined;
     this.mp4StartTime = undefined;
     this.decoder = null; // For previewing only
     this.previewManager = null;
@@ -10555,6 +11293,10 @@ class VideoProcessor {
     this.timeRangeStart = undefined;
     this.timeRangeEnd = undefined;
     this.pipeline = null;
+
+    // Start periodic cleanup
+    this.resourceManager.startPeriodicCleanup();
+    (0,_logging_js__WEBPACK_IMPORTED_MODULE_0__.infoLog)("VideoProcessor", "VideoProcessor initialized");
   }
 
   /**
@@ -10574,6 +11316,14 @@ class VideoProcessor {
       rotation = 180;
     }
     this.updateRotation(rotation);
+  }
+
+  /**
+   * Gets the current state of the processor.
+   * @returns {string} The current state.
+   */
+  get state() {
+    return this.stateManager.getCurrentState();
   }
 
   /**
@@ -10606,11 +11356,18 @@ class VideoProcessor {
    * @returns {Promise<void>}
    */
   async finalize() {
-    if (this.state !== "finalized") {
+    if (!this.stateManager.isInState("finalized")) {
       const endProcessVideoTime = performance.now();
-      (0,_logging_js__WEBPACK_IMPORTED_MODULE_0__.performanceLog)(`Total processing time: ${endProcessVideoTime - this.startProcessVideoTime} ms, FPS: ${this.frame_count / ((endProcessVideoTime - this.startProcessVideoTime) / 1000)}`);
-      this.state = "finalized";
-      this.processingResolve();
+      const totalTime = endProcessVideoTime - this.startProcessVideoTime;
+      const fps = this.frame_count / (totalTime / 1000);
+      (0,_logging_js__WEBPACK_IMPORTED_MODULE_0__.performanceLog)("VideoProcessing", `Total processing time: ${totalTime}ms, FPS: ${fps.toFixed(2)}`, totalTime);
+      this.stateManager.transitionTo("finalized");
+      this.stateManager.resolveProcessing();
+      (0,_logging_js__WEBPACK_IMPORTED_MODULE_0__.infoLog)("VideoProcessor", "Video processing finalized", {
+        totalTime,
+        fps: fps.toFixed(2),
+        frameCount: this.frame_count
+      });
     }
   }
 
@@ -10620,17 +11377,36 @@ class VideoProcessor {
    * @returns {Promise<void>}
    */
   async initFile(file) {
-    if (this.state !== "idle") {
+    // Validate file
+    const validation = this.errorHandler.validateVideoFile(file);
+    if (!validation.isValid) {
+      throw new Error(validation.error);
+    }
+
+    // Check browser support
+    const browserSupport = this.errorHandler.checkBrowserSupport();
+    if (!browserSupport.supported) {
+      throw new Error(`Browser not supported. Missing features: ${browserSupport.missingFeatures.join(", ")}`);
+    }
+    if (!this.stateManager.isInState("idle")) {
       throw new Error("Processor is not idle");
     }
-    this.state = "initializing";
+    this.stateManager.transitionTo("initializing");
+    (0,_logging_js__WEBPACK_IMPORTED_MODULE_0__.infoLog)("VideoProcessor", "Starting file initialization", {
+      fileName: file.name,
+      fileSize: file.size
+    });
     try {
       const videoURL = URL.createObjectURL(file);
       await this.setupDemuxer(videoURL);
       URL.revokeObjectURL(videoURL);
     } catch (error) {
-      console.error("Error processing video:", error);
-      this.uiManager.setStatus("error", error.message);
+      this.stateManager.transitionTo("error");
+      await this.errorHandler.handleError(error, "file loading", {
+        showToUser: true,
+        critical: false
+      });
+      throw error;
     }
   }
 
@@ -10639,9 +11415,10 @@ class VideoProcessor {
    * This allows for reprocessing of the video with different settings.
    */
   resetForReprocessing() {
-    if (this.state === "finalized") {
-      this.state = "initialized";
+    if (this.stateManager.isInState("finalized")) {
+      this.stateManager.transitionTo("initialized");
       this.sampleManager.resetForReprocessing();
+      (0,_logging_js__WEBPACK_IMPORTED_MODULE_0__.debugLog)("VideoProcessor", "Reset for reprocessing");
     }
   }
 
@@ -10652,7 +11429,7 @@ class VideoProcessor {
    */
   async processFile() {
     this.resetForReprocessing();
-    if (this.state !== "initialized") {
+    if (!this.stateManager.isInState("initialized")) {
       throw new Error("Processor is not initialized");
     }
     await this.waitForPreviousPromise(); // For preview
@@ -10671,16 +11448,30 @@ class VideoProcessor {
       isChromeBased: this.isChromeBased,
       fps: this.fps
     });
-    await this.pipeline.setup(this.videoConfig);
-    this.state = "processing";
-    this.processingPromise = new Promise(resolve => {
-      this.processingResolve = resolve;
+    try {
+      await this.pipeline.setup(this.videoConfig);
+    } catch (error) {
+      await this.errorHandler.handleError(error, "pipeline setup", {
+        showToUser: true,
+        critical: true
+      });
+      throw error;
+    }
+    this.stateManager.transitionTo("processing");
+    let processingResolve;
+    const processingPromise = new Promise(resolve => {
+      processingResolve = resolve;
     });
+    this.stateManager.setProcessingPromise(processingPromise, processingResolve);
     try {
       await this.pipeline.start(this.timeRangeStart, this.timeRangeEnd);
     } catch (error) {
-      console.error("Error processing video:", error);
-      this.uiManager.setStatus("error", error.message);
+      this.stateManager.transitionTo("error");
+      await this.errorHandler.handleError(error, "processing", {
+        showToUser: true,
+        critical: false
+      });
+      throw error;
     }
   }
 
@@ -10729,37 +11520,64 @@ class VideoProcessor {
    * @returns {Promise<void>}
    */
   async setup(config) {
-    this.videoConfig = config;
-    this.videoWidth = config.codedWidth;
-    this.videoHeight = config.codedHeight;
-    this.matrix = config.matrix;
-    this.fps = config.fps;
-    this.mp4StartTime = config.startTime;
+    try {
+      this.videoConfig = config;
+      this.videoWidth = config.codedWidth;
+      this.videoHeight = config.codedHeight;
+      this.matrix = config.matrix;
+      this.fps = config.fps;
+      this.mp4StartTime = config.startTime;
+      (0,_logging_js__WEBPACK_IMPORTED_MODULE_0__.infoLog)("VideoProcessor", "Video configuration received", {
+        width: this.videoWidth,
+        height: this.videoHeight,
+        fps: this.fps,
+        codec: config.codec
+      });
 
-    // Setup decoder for previewing
-    await this.setupPreviewDecoder(config);
-    this.uiManager.setup(this.videoWidth, this.videoHeight, this.matrix, this.zoom, this.rotation);
-    this.setInitialRotation(this.matrix);
-    this.frame_count = 0;
-    this.uiManager.updateFrameCount(0, 0); // Initially 0 samples
+      // Setup decoder for previewing
+      await this.setupPreviewDecoder(config);
+      this.uiManager.setup(this.videoWidth, this.videoHeight, this.matrix, this.zoom, this.rotation);
+      this.setInitialRotation(this.matrix);
+      this.frame_count = 0;
+      this.uiManager.updateFrameCount(0, 0); // Initially 0 samples
 
-    this.state = "initialized";
-    this.previewManager = new _previewManager_js__WEBPACK_IMPORTED_MODULE_3__.PreviewManager(this.decoder, this.sampleManager);
-    if (this.onInitialized) {
-      this.onInitialized(this.sampleManager.sampleCount());
+      this.stateManager.transitionTo("initialized");
+      this.previewManager = new _previewManager_js__WEBPACK_IMPORTED_MODULE_3__.PreviewManager(this.decoder, this.sampleManager);
+      if (this.onInitialized) {
+        this.onInitialized(this.sampleManager.sampleCount());
+      }
+      (0,_logging_js__WEBPACK_IMPORTED_MODULE_0__.infoLog)("VideoProcessor", "Video processor setup complete");
+    } catch (error) {
+      this.stateManager.transitionTo("error");
+      await this.errorHandler.handleError(error, "initialization", {
+        showToUser: true,
+        critical: true
+      });
+      throw error;
     }
   }
   async setupPreviewDecoder(config) {
-    // This decoder is only for previews. The pipeline will create its own.
-    this.decoder = new _videoDecoder_js__WEBPACK_IMPORTED_MODULE_2__.VideoDecoder({
-      onFrame: frame => this.handlePreviewDecoderOutput(frame),
-      onError: e => console.error(e),
-      // No onDequeue for preview decoder, it's driven on demand.
-      isChromeBased: this.isChromeBased
-    });
-    await this.decoder.setup(config);
-    this.uiManager.setStatus("decode", "Preview Decoder configured");
-    await this.sampleManager.waitForReady();
+    try {
+      // This decoder is only for previews. The pipeline will create its own.
+      this.decoder = new _videoDecoder_js__WEBPACK_IMPORTED_MODULE_2__.VideoDecoder({
+        onFrame: frame => this.handlePreviewDecoderOutput(frame),
+        onError: e => {
+          (0,_logging_js__WEBPACK_IMPORTED_MODULE_0__.errorLog)("PreviewDecoder", "Decoder error", e);
+        },
+        // No onDequeue for preview decoder, it's driven on demand.
+        isChromeBased: this.isChromeBased
+      });
+      await this.decoder.setup(config);
+      this.uiManager.setStatus("decode", "Preview Decoder configured");
+      await this.sampleManager.waitForReady();
+      (0,_logging_js__WEBPACK_IMPORTED_MODULE_0__.infoLog)("VideoProcessor", "Preview decoder setup complete");
+    } catch (error) {
+      await this.errorHandler.handleError(error, "preview decoder setup", {
+        showToUser: true,
+        critical: false
+      });
+      throw error;
+    }
   }
 
   /**
@@ -10768,12 +11586,22 @@ class VideoProcessor {
    * @returns {Promise<void>}
    */
   async handlePreviewDecoderOutput(frame) {
-    if (this.state !== "initialized") {
-      frame.close();
+    if (!this.stateManager.isInState("initialized")) {
+      this.resourceManager.closeFrame({
+        frame,
+        context: "preview",
+        closed: false
+      });
       throw new Error("Processor should be in the initialized state for previewing");
     }
-    this.previewManager.drawPreview(frame, f => this.uiManager.drawFrame(f));
-    frame.close();
+    try {
+      await this.resourceManager.processFrame(frame, f => {
+        this.previewManager.drawPreview(f, drawFrame => this.uiManager.drawFrame(drawFrame));
+      }, "preview");
+    } catch (error) {
+      (0,_logging_js__WEBPACK_IMPORTED_MODULE_0__.errorLog)("VideoProcessor", "Error handling preview frame", error);
+      throw error;
+    }
   }
 
   /**
@@ -10784,18 +11612,27 @@ class VideoProcessor {
    */
   async renderSampleInPercentage(percentage) {
     this.resetForReprocessing();
-    if (this.state !== "initialized") {
+    if (!this.stateManager.isInState("initialized")) {
       throw new Error("Processor should be in the initialized state");
     }
     this.lastPreviewPercentage = percentage;
+    (0,_logging_js__WEBPACK_IMPORTED_MODULE_0__.debugLog)("VideoProcessor", `Rendering preview at ${percentage}%`);
+    try {
+      // Phase 1: Prepare preview and get handle
+      const previewHandle = this.previewManager.preparePreview(percentage);
+      await this.waitForPreviousPromise();
 
-    // Phase 1: Prepare preview and get handle
-    const previewHandle = this.previewManager.preparePreview(percentage);
-    await this.waitForPreviousPromise();
-    // Phase 2: start preview decoding
-    const previewPromise = this.previewManager.executePreview(previewHandle);
-    if (previewPromise) {
-      this.previousPromise = previewPromise;
+      // Phase 2: start preview decoding
+      const previewPromise = this.previewManager.executePreview(previewHandle);
+      if (previewPromise) {
+        this.stateManager.setPreviousPromise(previewPromise);
+      }
+    } catch (error) {
+      await this.errorHandler.handleError(error, "preview", {
+        showToUser: false,
+        critical: false
+      });
+      throw error;
     }
   }
 
@@ -10804,7 +11641,7 @@ class VideoProcessor {
    * @returns {boolean} True if processing, false otherwise
    */
   isProcessing() {
-    return this.state === "processing";
+    return this.stateManager.isProcessing();
   }
 
   /**
@@ -10812,11 +11649,12 @@ class VideoProcessor {
    * @returns {Promise<void>}
    */
   async waitForProcessing() {
-    if (this.state !== "processing" && this.state !== "exhausted") {
+    if (!this.stateManager.isProcessing()) {
       return;
     }
-    if (this.processingPromise) {
-      await this.processingPromise;
+    const processingPromise = this.stateManager.getProcessingPromise();
+    if (processingPromise) {
+      await processingPromise;
     }
   }
 
@@ -10825,7 +11663,7 @@ class VideoProcessor {
    * @returns {boolean} True if there is a pending promise
    */
   get hasPreviousPromise() {
-    return this.previousPromise !== null;
+    return this.stateManager.hasPreviousPromise();
   }
 
   /**
@@ -10833,16 +11671,180 @@ class VideoProcessor {
    * @returns {Promise<boolean>} Resolves to true when previous promise is completed
    */
   async waitForPreviousPromise() {
-    let tempPromise = this.previousPromise;
+    let tempPromise = this.stateManager.getPreviousPromise();
     while (tempPromise) {
       await tempPromise;
-      if (tempPromise === this.previousPromise) {
+      if (tempPromise === this.stateManager.getPreviousPromise()) {
         break;
       }
-      tempPromise = this.previousPromise;
+      tempPromise = this.stateManager.getPreviousPromise();
     }
-    this.previousPromise = null;
+    this.stateManager.clearPreviousPromise();
     return true;
+  }
+
+  /**
+   * Shuts down the processor and cleans up resources
+   */
+  shutdown() {
+    (0,_logging_js__WEBPACK_IMPORTED_MODULE_0__.infoLog)("VideoProcessor", "Shutting down video processor");
+    this.resourceManager.shutdown();
+    this.stateManager.reset();
+  }
+}
+
+/***/ }),
+
+/***/ "./videoProcessorState.js":
+/*!********************************!*\
+  !*** ./videoProcessorState.js ***!
+  \********************************/
+/***/ ((__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) => {
+
+"use strict";
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   VideoProcessorState: () => (/* binding */ VideoProcessorState)
+/* harmony export */ });
+/**
+ * Manages the state transitions for the VideoProcessor.
+ * Provides a centralized way to handle state changes and validation.
+ */
+class VideoProcessorState {
+  constructor() {
+    this.currentState = "idle";
+    this.processingPromise = null;
+    this.processingResolve = null;
+    this.previousPromise = null;
+
+    // Define valid state transitions
+    this.transitions = {
+      idle: ["initializing", "error"],
+      initializing: ["initialized", "error"],
+      initialized: ["processing", "finalized", "error"],
+      processing: ["finalized", "error"],
+      finalized: ["initialized", "idle"],
+      error: ["idle", "initializing"]
+    };
+  }
+
+  /**
+   * Attempts to transition to a new state.
+   * @param {string} newState - The target state
+   * @returns {boolean} - True if transition is valid, false otherwise
+   */
+  transitionTo(newState) {
+    const validTransitions = this.transitions[this.currentState];
+    if (!validTransitions.includes(newState)) {
+      console.error(`Invalid state transition from ${this.currentState} to ${newState}`);
+      return false;
+    }
+    console.log(`State transition: ${this.currentState} -> ${newState}`);
+    this.currentState = newState;
+    return true;
+  }
+
+  /**
+   * Gets the current state.
+   * @returns {string} - The current state
+   */
+  getCurrentState() {
+    return this.currentState;
+  }
+
+  /**
+   * Checks if the processor is in a specific state.
+   * @param {string} state - The state to check
+   * @returns {boolean} - True if in the specified state
+   */
+  isInState(state) {
+    return this.currentState === state;
+  }
+
+  /**
+   * Checks if the processor is processing.
+   * @returns {boolean} - True if processing
+   */
+  isProcessing() {
+    return this.currentState === "processing";
+  }
+
+  /**
+   * Checks if the processor is initialized.
+   * @returns {boolean} - True if initialized
+   */
+  isInitialized() {
+    return this.currentState === "initialized";
+  }
+
+  /**
+   * Sets the processing promise and resolve function.
+   * @param {Promise} promise - The processing promise
+   * @param {Function} resolve - The resolve function
+   */
+  setProcessingPromise(promise, resolve) {
+    this.processingPromise = promise;
+    this.processingResolve = resolve;
+  }
+
+  /**
+   * Gets the processing promise.
+   * @returns {Promise|null} - The processing promise
+   */
+  getProcessingPromise() {
+    return this.processingPromise;
+  }
+
+  /**
+   * Resolves the processing promise.
+   */
+  resolveProcessing() {
+    if (this.processingResolve) {
+      this.processingResolve();
+      this.processingResolve = null;
+      this.processingPromise = null;
+    }
+  }
+
+  /**
+   * Sets the previous promise for preview operations.
+   * @param {Promise} promise - The previous promise
+   */
+  setPreviousPromise(promise) {
+    this.previousPromise = promise;
+  }
+
+  /**
+   * Gets the previous promise.
+   * @returns {Promise|null} - The previous promise
+   */
+  getPreviousPromise() {
+    return this.previousPromise;
+  }
+
+  /**
+   * Clears the previous promise.
+   */
+  clearPreviousPromise() {
+    this.previousPromise = null;
+  }
+
+  /**
+   * Checks if there is a previous promise.
+   * @returns {boolean} - True if there is a previous promise
+   */
+  hasPreviousPromise() {
+    return this.previousPromise !== null;
+  }
+
+  /**
+   * Resets the state to idle.
+   */
+  reset() {
+    this.currentState = "idle";
+    this.processingPromise = null;
+    this.processingResolve = null;
+    this.previousPromise = null;
   }
 }
 
@@ -12812,6 +13814,10 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var _timeRangeProvider_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ./timeRangeProvider.js */ "./timeRangeProvider.js");
 /* harmony import */ var _videoProcessor_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ./videoProcessor.js */ "./videoProcessor.js");
 /* harmony import */ var _frameRangeSlider_js__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! ./frameRangeSlider.js */ "./frameRangeSlider.js");
+/* harmony import */ var _errorHandler_js__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(/*! ./errorHandler.js */ "./errorHandler.js");
+/* harmony import */ var _logging_js__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(/*! ./logging.js */ "./logging.js");
+
+
 
 
 
@@ -12829,6 +13835,7 @@ const timestampProvider = new _timeStampProvider_js__WEBPACK_IMPORTED_MODULE_0__
   timestampInputs: document.getElementById("timestampInputs")
 });
 let processor = null;
+let errorHandler = null;
 
 /**
  * Event listener for the video input file selection.
@@ -12840,13 +13847,27 @@ document.getElementById("videoInput").addEventListener("change", async e => {
     document.getElementById("processButton").disabled = true;
     return;
   }
-  if (file) {
+  try {
+    // Initialize error handler if not already done
+    if (!errorHandler) {
+      errorHandler = new _errorHandler_js__WEBPACK_IMPORTED_MODULE_4__.ErrorHandler({
+        setStatus: (phase, message) => {
+          document.getElementById("status").textContent = `${phase}: ${message}`;
+        }
+      });
+    }
+
     // Reset processor if it exists
     if (processor != null) {
-      if (processor.isProcessing) {
+      if (processor.isProcessing()) {
         await processor.waitForProcessing();
       }
+      processor.shutdown();
     }
+    (0,_logging_js__WEBPACK_IMPORTED_MODULE_5__.infoLog)("Main", "Initializing video processor", {
+      fileName: file.name
+    });
+
     // Initialize the video processor
     processor = new _videoProcessor_js__WEBPACK_IMPORTED_MODULE_2__.VideoProcessor({
       canvas: document.getElementById("processorCanvas"),
@@ -12865,8 +13886,15 @@ document.getElementById("videoInput").addEventListener("change", async e => {
       frameRangeSlider.onupdatepercentage = percentage => {
         processor.renderSampleInPercentage(percentage);
       };
+      (0,_logging_js__WEBPACK_IMPORTED_MODULE_5__.infoLog)("Main", "Video processor initialized", {
+        sampleCount: nb_samples
+      });
     };
-    processor.initFile(file);
+    await processor.initFile(file);
+  } catch (error) {
+    (0,_logging_js__WEBPACK_IMPORTED_MODULE_5__.errorLog)("Main", "Failed to initialize video processor", error);
+    document.getElementById("processButton").disabled = true;
+    document.getElementById("status").textContent = `Error: ${error.message}`;
   }
 });
 
@@ -12879,22 +13907,39 @@ document.getElementById("processButton").addEventListener("click", async () => {
   if (!file) return;
   try {
     document.getElementById("processButton").disabled = true;
+    (0,_logging_js__WEBPACK_IMPORTED_MODULE_5__.infoLog)("Main", "Starting video processing");
     if (frameRangeSlider.isSliderModeActive()) {
       const {
         startFrame,
         endFrame
       } = frameRangeSlider.getFrameRange();
+      (0,_logging_js__WEBPACK_IMPORTED_MODULE_5__.infoLog)("Main", "Processing by frame range", {
+        startFrame,
+        endFrame
+      });
       await processor.processFileByFrame(startFrame, endFrame);
     } else {
       const {
         startMs,
         endMs
       } = timeRangeProvider.getTimeRange();
+      (0,_logging_js__WEBPACK_IMPORTED_MODULE_5__.infoLog)("Main", "Processing by time range", {
+        startMs,
+        endMs
+      });
       await processor.processFileByTime(startMs, endMs);
     }
+    (0,_logging_js__WEBPACK_IMPORTED_MODULE_5__.infoLog)("Main", "Video processing completed successfully");
   } catch (error) {
-    console.error("Error processing video:", error);
-    processor.status.textContent = "Error processing video";
+    (0,_logging_js__WEBPACK_IMPORTED_MODULE_5__.errorLog)("Main", "Error processing video", error);
+    if (errorHandler) {
+      await errorHandler.handleError(error, "processing", {
+        showToUser: true,
+        critical: false
+      });
+    } else {
+      document.getElementById("status").textContent = "Error processing video";
+    }
   } finally {
     document.getElementById("processButton").disabled = false;
   }
