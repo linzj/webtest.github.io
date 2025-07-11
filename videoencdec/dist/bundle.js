@@ -8846,11 +8846,11 @@ class ErrorHandler {
         error: "Selected file is not a video"
       };
     }
-    const maxSize = 500 * 1024 * 1024; // 500MB
+    const maxSize = 1500 * 1024 * 1024; // 1.5GB
     if (file.size > maxSize) {
       return {
         isValid: false,
-        error: "Video file is too large (max 500MB)"
+        error: "Video file is too large (max 1.5GB)"
       };
     }
     const supportedTypes = ["video/mp4", "video/webm", "video/ogg", "video/quicktime", "video/x-msvideo"];
