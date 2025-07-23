@@ -13972,6 +13972,9 @@ document.getElementById("videoInput").addEventListener("change", async e => {
       frameRangeSlider.onupdatepercentage = percentage => {
         processor.renderSampleInPercentage(percentage);
       };
+
+      // Show initial preview at first frame when file is loaded and samples are ready
+      processor.renderSampleInPercentage(0);
       (0,_logging_js__WEBPACK_IMPORTED_MODULE_5__.infoLog)("Main", "Video processor initialized", {
         sampleCount: nb_samples
       });
