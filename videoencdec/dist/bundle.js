@@ -12892,6 +12892,8 @@ class VideoEncoder {
     this.fileStream = null; // Writable stream for the output file.
     this.root = null; // Root directory for file system access.
     this.tempFileName = `temp-manji.mp4`; // Temporary file name for the encoded video.
+    this.frameCount = 0; // Track the number of frames encoded.
+    this.fps = 30; // Default fps, will be updated in init().
   }
 
   /**
@@ -12909,8 +12911,13 @@ class VideoEncoder {
   async init(width, height, fps, useCalculatedBitrate, useFileSystem = false) {
     (0,_logging_js__WEBPACK_IMPORTED_MODULE_0__.verboseLog)("Initializing encoder with dimensions:", {
       width,
-      height
+      height,
+      fps
     });
+
+    // Store fps for keyframe interval calculation
+    this.fps = fps;
+    this.frameCount = 0; // Reset frame count on init
 
     // Define maximum dimensions for H.264 Level 5.1 (e.g., 4K resolution).
     const maxWidth = 4096;
@@ -13039,8 +13046,23 @@ class VideoEncoder {
       });
       await this.blockingPromise;
     }
-    // Encode the frame and then close it to free up resources.
-    this.encoder.encode(frame);
+    // Track frame count and force keyframes at regular intervals
+    this.frameCount++;
+
+    // Force a keyframe every fps frames (1 second GOP)
+    // Round fps to nearest integer for keyframe interval calculation
+    const keyframeInterval = Math.round(this.fps);
+    const forceKeyframe = (this.frameCount - 1) % keyframeInterval === 0;
+
+    // Encode the frame with keyframe hint if needed
+    if (forceKeyframe) {
+      (0,_logging_js__WEBPACK_IMPORTED_MODULE_0__.verboseLog)(`Forcing keyframe at frame ${this.frameCount} (fps: ${this.fps}, interval: ${keyframeInterval})`);
+      this.encoder.encode(frame, {
+        keyFrame: true
+      });
+    } else {
+      this.encoder.encode(frame);
+    }
     frame.close();
   }
 
