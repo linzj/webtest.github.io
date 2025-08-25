@@ -1,6 +1,9 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+
     <meta charset="UTF-8">
     <title>拖放图片显示并保存截图</title>
     <style>
@@ -96,6 +99,20 @@
 
         .quality-control input {
             width: 100%;
+        }
+
+        .rich-block {
+            padding: 12px;
+            background: #fafafa;
+            border: 1px dashed #ddd;
+            border-radius: 8px;
+            overflow-x: auto;
+            line-height: 1.5;
+        }
+
+        .rich-block img {
+            max-width: 100%;
+            height: auto;
         }
     </style>
 </head>
@@ -225,57 +242,239 @@
             }
         }
 
-        // 生成并保存截图
-        saveBtn.addEventListener('click', () => {
-            // 由于画廊可能超出可视区域，创建一个临时容器
-            const tempGallery = document.createElement('div');
-            tempGallery.style.padding = '10px';
-            tempGallery.style.backgroundColor = '#fff';
-            tempGallery.style.borderRadius = '10px';
-            tempGallery.style.boxShadow = '0 2px 5px rgba(0,0,0,0.1)';
-            tempGallery.style.display = 'flex';
-            tempGallery.style.flexDirection = 'column';
-            tempGallery.style.gap = '10px';
+        // 生成并保存截图（展开滚动、等待图片、单路径导出）
+        saveBtn.addEventListener('click', async () => {
+            const tempGallery = gallery.cloneNode(true);
 
-            // 克隆所有图片到临时容器
-            gallery.querySelectorAll('img').forEach(img => {
-                const clonedImg = img.cloneNode(true);
-                tempGallery.appendChild(clonedImg);
+            // 展开克隆：去掉滚动/高度限制，确保整块内容渲染
+            Object.assign(tempGallery.style, {
+                padding: '10px',
+                backgroundColor: '#fff',
+                borderRadius: '10px',
+                boxShadow: '0 2px 5px rgba(0,0,0,0.1)',
+                position: 'absolute',
+                left: '-99999px',
+                top: '0',
+                maxHeight: 'none',
+                overflow: 'visible',
+                width: (gallery.clientWidth || 800) + 'px' // 固定宽度，避免换行差异
             });
 
-            // 将临时容器添加到文档中（隐藏）
-            tempGallery.style.position = 'absolute';
-            tempGallery.style.top = '-9999px';
+            // 子元素也可能带 overflow/max-height，强制展开（仅用于克隆）
+            tempGallery.querySelectorAll('*').forEach(el => {
+                el.style.maxHeight = 'none';
+                el.style.overflow = 'visible';
+            });
+
             document.body.appendChild(tempGallery);
 
-            // 使用 html2canvas 生成截图
-            html2canvas(tempGallery, {
-                useCORS: true,
-                scale: 1, // Reduce scale to 1 (default is window.devicePixelRatio)
-                logging: false, // Disable logging
-                backgroundColor: '#ffffff'
-            }).then(canvas => {
-                // 移除临时容器
-                document.body.removeChild(tempGallery);
+            try {
+                // 等待所有图片就绪（包括粘贴的 HTML 内部图片）
+                await waitForImages(tempGallery);
 
-                // Use the quality value from the slider
-                const quality = parseInt(qualitySlider.value) / 100;
+                // 若内容极长，可能超过浏览器画布上限，走分页导出
+                const MAX_DIM = 16384; // 保守阈值
+                const naturalHeight = tempGallery.scrollHeight;
 
-                // Convert to blob with quality control
-                canvas.toBlob(function (blob) {
+                if (naturalHeight > MAX_DIM) {
+                    await exportInPages(tempGallery); // 见下方实现
+                    return;
+                }
+
+                const canvas = await html2canvas(tempGallery, {
+                    useCORS: true,
+                    scale: 1,
+                    logging: false,
+                    backgroundColor: '#ffffff'
+                });
+
+                const quality = parseInt(qualitySlider.value, 10) / 100;
+                await downloadCanvasAsJpeg(canvas, 'gallery_screenshot.jpg', quality);
+            } catch (err) {
+                console.error('截图生成失败:', err);
+                alert('生成截图时发生错误。请确保所有资源可访问且没有跨域限制。');
+            } finally {
+                tempGallery.remove();
+            }
+        });
+
+        // 等待克隆中的 <img> 全部就绪
+        async function waitForImages(root) {
+            const imgs = [...root.querySelectorAll('img')];
+            // 关闭懒加载，尽量解码
+            await Promise.all(imgs.map(async img => {
+                img.removeAttribute('loading');
+                if (!img.complete || img.naturalWidth === 0) {
+                    try { await img.decode(); } catch (_) { }
+                }
+            }));
+        }
+
+        // 下载工具
+        function downloadCanvasAsJpeg(canvas, filename, quality = 0.9) {
+            return new Promise(resolve => {
+                canvas.toBlob(blob => {
                     const link = document.createElement('a');
                     link.href = URL.createObjectURL(blob);
-                    link.download = 'gallery_screenshot.png';
+                    link.download = filename;
                     document.body.appendChild(link);
                     link.click();
-                    document.body.removeChild(link);
-                }, 'image/png', quality);
-            }).catch(err => {
-                console.error('截图生成失败:', err);
-                alert('生成截图时发生错误。请确保所有图片都已加载并且没有跨域问题。');
+                    link.remove();
+                    resolve();
+                }, 'image/jpeg', quality);
             });
-        });
+        }
+        async function exportInPages(container) {
+            const children = [...container.children];
+            const pageWidth = container.clientWidth || 800;
+            const MAX_DIM = 16384;
+            const pagePadding = 0;
+
+            let pageCanvas = document.createElement('canvas');
+            let ctx = pageCanvas.getContext('2d');
+            pageCanvas.width = pageWidth;
+            pageCanvas.height = MAX_DIM; // 画布按最大高度建立，再按已用高度裁剪输出
+
+            let y = 0;
+            let pageIndex = 1;
+
+            for (const block of children) {
+                // 为确保样式一致，针对 block 渲染
+                const blockCanvas = await html2canvas(block, {
+                    useCORS: true,
+                    scale: 1,
+                    logging: false,
+                    backgroundColor: '#ffffff',
+                    // foreignObjectRendering: true // 如需尝试更好富文本，但兼容性略差
+                });
+
+                // 如果当前页放不下，就先导出当前页，再开新页
+                if (y + blockCanvas.height > MAX_DIM) {
+                    // 裁剪导出当前页有效区域
+                    await downloadCanvasAsJpeg(cropCanvas(pageCanvas, pageWidth, y), `gallery_page_${pageIndex}.jpg`, parseInt(qualitySlider.value, 10) / 100);
+
+                    // 新开一页
+                    pageIndex++;
+                    pageCanvas = document.createElement('canvas');
+                    ctx = pageCanvas.getContext('2d');
+                    pageCanvas.width = pageWidth;
+                    pageCanvas.height = MAX_DIM;
+                    y = 0;
+                }
+
+                ctx.drawImage(blockCanvas, 0, y);
+                y += blockCanvas.height + pagePadding;
+            }
+
+            // 导出最后一页（如果有内容）
+            if (y > 0) {
+                await downloadCanvasAsJpeg(cropCanvas(pageCanvas, pageWidth, y), `gallery_page_${pageIndex}.jpg`, parseInt(qualitySlider.value, 10) / 100);
+            }
+
+            function cropCanvas(src, w, h) {
+                const c = document.createElement('canvas');
+                c.width = w;
+                c.height = h;
+                c.getContext('2d').drawImage(src, 0, 0, w, h, 0, 0, w, h);
+                return c;
+            }
+        }
+
     </script>
+    <script>
+        // 全局启用粘贴（也可以改回只监听 dropZone）
+        document.addEventListener('paste', handlePaste);
+
+        async function handlePaste(e) {
+            const dt = e.clipboardData || window.clipboardData;
+            if (!dt) return;
+
+            // 1) 先处理剪贴板里的“图片文件”
+            const fileItems = [...dt.items].filter(it => it.kind === 'file' && it.type.startsWith('image/'));
+            if (fileItems.length) {
+                e.preventDefault();
+                const files = fileItems.map(it => it.getAsFile()).filter(Boolean);
+                if (files.length) handleFiles(files); // 复用你已有的图片压缩+预览流程
+                return;
+            }
+
+            // 2) 再尝试 HTML（多数应用会在剪贴板里放 text/html）
+            const html = dt.getData('text/html');
+            if (html) {
+                e.preventDefault();
+                addHtmlBlock(html);   // 渲染到画廊
+                return;
+            }
+
+            // 3) 没有 HTML？试试 RTF（如 Word 只给了 RTF）
+            const rtf = dt.getData('text/rtf');
+            if (rtf) {
+                e.preventDefault();
+                // 简易 RTF->HTML（保底）；如需高保真可替换为第三方 RTF 解析库
+                const htmlFromRtf = rtfToHtmlBasic(rtf);
+                addHtmlBlock(htmlFromRtf);
+                return;
+            }
+
+            // 4) 最后兜底：纯文本
+            const text = dt.getData('text/plain');
+            if (text) {
+                e.preventDefault();
+                addHtmlBlock('<pre style="white-space:pre-wrap;margin:0;">' + escapeHtml(text) + '</pre>');
+            }
+        }
+
+        // 将 HTML 安全插入画廊；并尽量把 <img> 转为 dataURL，避免导出时跨域失效
+        function addHtmlBlock(htmlString) {
+            const cleaned = DOMPurify.sanitize(htmlString, {
+                ADD_TAGS: ['table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'style'],
+                ADD_ATTR: ['style', 'cellpadding', 'cellspacing', 'border']
+            });
+            const wrapper = document.createElement('div');
+            wrapper.className = 'rich-block';
+            wrapper.innerHTML = cleaned;
+            gallery.appendChild(wrapper);
+            inlineImages(wrapper);  // 尝试把远程图转 dataURL（受 CORS 限制，尽力而为）
+        }
+
+        // 将 <img src> 尽量内联为 dataURL，提升 html2canvas 可导出成功率
+        async function inlineImages(root) {
+            const imgs = [...root.querySelectorAll('img')];
+            await Promise.all(imgs.map(async (img) => {
+                try {
+                    if (!img.src || img.src.startsWith('data:')) return;
+                    const res = await fetch(img.src, { mode: 'cors' });
+                    if (!res.ok) return;
+                    const blob = await res.blob();
+                    const reader = new FileReader();
+                    await new Promise((resolve) => {
+                        reader.onload = () => { img.src = reader.result; resolve(); };
+                        reader.readAsDataURL(blob);
+                    });
+                } catch (_) {
+                    // 跨域或阻止：静默跳过（导出时该图可能被 html2canvas 忽略）
+                }
+            }));
+        }
+
+        // 非高保真：把常见 RTF 控制词去掉，并处理 \par、\'xx、\uN
+        function rtfToHtmlBasic(rtf) {
+            let s = rtf;
+            s = s.replace(/\\par[d]?/g, '\n');
+            s = s.replace(/\\'([0-9a-fA-F]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+            s = s.replace(/\\u(-?\d+)\??/g, (_, u) => String.fromCharCode((+u + 65536) % 65536));
+            s = s.replace(/{\\.*?}/g, '');             // 去掉内联组（粗略）
+            s = s.replace(/\\[a-z]+\d* ?/gi, '');      // 去掉控制词（粗略）
+            s = s.replace(/[{}]/g, '');                // 去掉分组括号
+            s = escapeHtml(s).replace(/\n/g, '<br>');
+            return `<div>${s}</div>`;
+        }
+
+        function escapeHtml(str) {
+            return str.replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+        }
+    </script>
+
 
 </body>
 
