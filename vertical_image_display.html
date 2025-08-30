@@ -261,7 +261,7 @@
 
                     // Create compressed image element
                     const compressedImg = document.createElement('img');
-                    compressedImg.src = canvas.toDataURL('image/jpeg', 0.8);
+                    compressedImg.src = canvas.toDataURL('image/png');
                     compressedImg.alt = file.name;
                     gallery.appendChild(compressedImg);
                 };
@@ -315,7 +315,7 @@
                 });
 
                 const quality = parseInt(qualitySlider.value, 10) / 100;
-                await downloadCanvasAsJpeg(canvas, 'gallery_screenshot.jpg', quality);
+                await downloadCanvasAsPng(canvas, 'gallery_screenshot.png', quality);
             } catch (err) {
                 console.error('截图生成失败:', err);
                 alert('生成截图时发生错误。请确保所有资源可访问且没有跨域限制。');
@@ -350,6 +350,21 @@
                 }, 'image/jpeg', quality);
             });
         }
+
+        function downloadCanvasAsPng(canvas, filename, _) {
+            return new Promise(resolve => {
+                canvas.toBlob(blob => {
+                    const link = document.createElement('a');
+                    link.href = URL.createObjectURL(blob);
+                    link.download = filename;
+                    document.body.appendChild(link);
+                    link.click();
+                    link.remove();
+                    resolve();
+                }, 'image/png');
+            });
+        }
+
         async function exportInPages(container) {
             const children = [...container.children];
             const pageWidth = container.clientWidth || 800;
@@ -377,7 +392,7 @@
                 // 如果当前页放不下，就先导出当前页，再开新页
                 if (y + blockCanvas.height > MAX_DIM) {
                     // 裁剪导出当前页有效区域
-                    await downloadCanvasAsJpeg(cropCanvas(pageCanvas, pageWidth, y), `gallery_page_${pageIndex}.jpg`, parseInt(qualitySlider.value, 10) / 100);
+                    await downloadCanvasPng(cropCanvas(pageCanvas, pageWidth, y), `gallery_page_${pageIndex}.png`, parseInt(qualitySlider.value, 10) / 100);
 
                     // 新开一页
                     pageIndex++;
@@ -394,7 +409,7 @@
 
             // 导出最后一页（如果有内容）
             if (y > 0) {
-                await downloadCanvasAsJpeg(cropCanvas(pageCanvas, pageWidth, y), `gallery_page_${pageIndex}.jpg`, parseInt(qualitySlider.value, 10) / 100);
+                await downloadCanvasAsPng(cropCanvas(pageCanvas, pageWidth, y), `gallery_page_${pageIndex}.png`, parseInt(qualitySlider.value, 10) / 100);
             }
 
             function cropCanvas(src, w, h) {
