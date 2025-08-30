@@ -3,6 +3,8 @@
 
 <head>
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+    <!-- Markdown renderer -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
     <meta charset="UTF-8">
     <title>拖放图片显示并保存截图</title>
@@ -113,6 +115,30 @@
         .rich-block img {
             max-width: 100%;
             height: auto;
+        }
+
+        /* Only style tables that came from Markdown */
+        .md-block table {
+            border-collapse: collapse;
+            width: 100%;
+        }
+
+        .md-block th,
+        .md-block td {
+            padding: 6px 10px;
+            border: 1px solid #e5e7eb;
+            /* draw grid lines */
+            text-align: left;
+            vertical-align: top;
+        }
+
+        .md-block thead th {
+            background: #f7f7f7;
+        }
+
+        .md-block tbody tr:nth-child(even) {
+            background: #fafafa;
+            /* subtle zebra */
         }
     </style>
 </head>
@@ -398,6 +424,12 @@
                 return;
             }
 
+            const text = dt.getData('text/plain');
+            if (isProbablyMarkdown(text)) {
+                addMarkdownBlock(text);
+                return;
+            }
+
             // 2) 再尝试 HTML（多数应用会在剪贴板里放 text/html）
             const html = dt.getData('text/html');
             if (html) {
@@ -417,7 +449,6 @@
             }
 
             // 4) 最后兜底：纯文本
-            const text = dt.getData('text/plain');
             if (text) {
                 e.preventDefault();
                 addHtmlBlock('<pre style="white-space:pre-wrap;margin:0;">' + escapeHtml(text) + '</pre>');
@@ -473,8 +504,50 @@
         function escapeHtml(str) {
             return str.replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
         }
-    </script>
 
+        // Heuristic detection for Markdown in plain text
+        function isProbablyMarkdown(s) {
+            let score = 0;
+            if (/^#{1,6}\s.+/m.test(s)) score += 2;          // headings
+            if (/^>\s.+/m.test(s)) score += 1;               // blockquote
+            if (/^(-|\*|\+)\s.+/m.test(s)) score += 1;       // bullet list
+            if (/^\d+\.\s.+/m.test(s)) score += 1;           // ordered list
+            if (/```[\s\S]*?```/.test(s)) score += 2;        // fenced code
+            if (/\[.+?\]\(.+?\)/.test(s)) score += 1;        // link
+            if (/\n-{3,}\n/.test(s) || /\n_{3,}\n/.test(s)) score += 1; // hr
+            if (/\|.*\|/.test(s) && /\n\|?[\s:\-|]+\|?\n/.test(s)) score += 2; // table
+            return score >= 2; // threshold
+        }
+
+        // Render markdown ➜ sanitize ➜ insert
+        function addMarkdownBlock(markdownText) {
+            // Configure marked (optional tweaks)
+            marked.setOptions({
+                gfm: true,
+                breaks: true,
+                headerIds: false, // avoid auto IDs unless you want them
+                mangle: false
+            });
+            const rawHtml = marked.parse(markdownText);
+            const cleaned = DOMPurify.sanitize(rawHtml, {
+                ADD_TAGS: ['table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td'],
+                ADD_ATTR: ['cellpadding', 'cellspacing', 'border', 'target', 'rel']
+            });
+            const wrapper = document.createElement('div');
+            wrapper.className = 'rich-block md-block';
+            wrapper.innerHTML = cleaned;
+            postProcessLinks(wrapper);
+            gallery.appendChild(wrapper);
+            inlineImages(wrapper);
+        }
+
+        function postProcessLinks(root) {
+            root.querySelectorAll('a[href]').forEach(a => {
+                a.target = '_blank';
+                a.rel = 'noopener noreferrer';
+            });
+        }
+    </script>
 
 </body>
 
