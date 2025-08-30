@@ -496,8 +496,8 @@
             try {
                 // Rich path
                 if (navigator.clipboard && navigator.clipboard.read) {
-                    const items = await navigator.clipboard.read();
-                    if (await processClipboardItems(items)) return;
+                    const clipboardItems = await navigator.clipboard.read();
+                    if (await processClipboardPayload(clipboardItems)) return;
                 }
 
                 // Text-only fallback
@@ -538,73 +538,97 @@
 
         // 全局启用粘贴（也可以改回只监听 dropZone）
         document.addEventListener('paste', handlePaste);
-        // Process rich clipboard items from navigator.clipboard.read()
-        // Returns true if something was handled/inserted.
-        async function processClipboardItems(items) {
-            let handled = false;
 
-            for (const item of items) {
-                // Prefer images first
-                const imgType = item.type.startsWith('image/') ? item.type : null;
-                if (imgType) {
-                    const blob = await item.getType(imgType);
-                    const file = new File([blob], `clipboard.${(imgType.split('/')[1] || 'png')}`, { type: imgType });
-                    handleFiles([file]);
-                    handled = true;
-                    continue;
+        // Unified payload handler for ClipboardItem[] or DataTransferItemList.
+        // Priority order (textual): image(s) -> markdown-looking plain text -> HTML -> plain text.
+        async function processClipboardPayload(payload) {
+            if (!payload) return false;
+            const list = Array.from(payload);
+            if (!list.length) return false;
+
+            const imageFiles = [];
+            let plainText = null; // original plain text
+            let htmlText = null;  // HTML string
+
+            const isClipboardItems = list.length && typeof list[0].getType === 'function' && !('kind' in list[0]);
+
+            if (isClipboardItems) {
+                for (const ci of list) {
+                    try {
+                        for (const t of ci.types) {
+                            if (t.startsWith('image/')) {
+                                try {
+                                    const blob = await ci.getType(t);
+                                    const ext = t.split('/')[1] || 'png';
+                                    imageFiles.push(new File([blob], `clipboard-${imageFiles.length}.${ext}`, { type: t }));
+                                } catch (err) { console.warn('Image read failed:', err); }
+                            }
+                        }
+                        if (ci.types.includes('text/plain') && plainText == null) {
+                            try { const b = await ci.getType('text/plain'); plainText = await b.text(); } catch (e) { }
+                        }
+                        if (ci.types.includes('text/html') && htmlText == null) {
+                            try { const b = await ci.getType('text/html'); htmlText = await b.text(); } catch (e) { }
+                        }
+                    } catch (err) { console.warn('ClipboardItem error:', err); }
                 }
+            } else {
+                // Revised priority: images -> HTML -> plain text (stop at first successful category)
+                try {
+                    // 1. Collect any image files; if found, handle immediately & return
+                    for (const it of list) {
+                        if (it.kind === 'file' && it.type.startsWith('image/')) {
+                            const f = it.getAsFile();
+                            if (f) imageFiles.push(f);
+                        }
+                    }
+                    if (imageFiles.length) {
+                        handleFiles(imageFiles); // early handle
+                        return true; // do not attempt to read text/html if images present
+                    }
 
-                const getItemAsString = async (item) => {
-                    const promise = new Promise((resolve) => {
-                        item.getAsString((s) => {
-                            resolve(s);
-                        });
+                    // Helper to promisify getAsString
+                    const getAsString = (item) => new Promise((res, rej) => {
+                        try { item.getAsString(d => res(d)); } catch (e) { rej(e); }
                     });
-                    return promise;
-                };
 
-                // RTF
-                if (item.type == 'text/rtf') {
-                    const rtf = await getItemAsString(item);
-                    addHtmlBlock(rtfToHtmlBasic(rtf));
-                    handled = true;
-                    continue;
-                }
-
-                // HTML
-                if (item.type == 'text/html') {
-                    const html = await getItemAsString(item);
-                    addHtmlBlock(html);
-                    handled = true;
-                    continue;
-                }
-
-                // RTF ➜ coarse HTML
-                if (item.type == 'text/rtf') {
-                    const rtf = await getItemAsString(item);
-                    addHtmlBlock(rtfToHtmlBasic(rtf));
-                    handled = true;
-                    continue;
-                }
-
-                // Plain text (Markdown detection)
-                if (item.type == 'text/plain') {
-                    const text = await getItemAsString(item);
-                    if (isProbablyMarkdown(text)) addMarkdownBlock(text);
-                    else addHtmlBlock('<pre style="white-space:pre-wrap;margin:0;">' + escapeHtml(text) + '</pre>');
-                    handled = true;
-                    continue;
+                    // 2. Look for HTML fragment
+                    const htmlItem = list.find(it => it.kind === 'string' && it.type === 'text/html');
+                    if (htmlItem) {
+                        try { htmlText = await getAsString(htmlItem); } catch (e) { /* ignore */ }
+                        // proceed to unified handling below (no plain text fetch when HTML found per spec)
+                    } else {
+                        // 3. Fallback: plain text
+                        const textItem = list.find(it => it.kind === 'string' && it.type === 'text/plain');
+                        if (textItem) {
+                            try { plainText = await getAsString(textItem); } catch (e) { /* ignore */ }
+                        }
+                    }
+                } catch (err) {
+                    console.warn('DataTransferItem processing error:', err);
                 }
             }
 
+            let handled = false;
+            // (Images already early-return in DataTransfer branch; here handles ClipboardItem image collection case.)
+            if (!handled && imageFiles.length) { handleFiles(imageFiles); handled = true; }
+
+            if (!handled) {
+                if (plainText && isProbablyMarkdown(plainText)) {
+                    addMarkdownBlock(plainText); handled = true;
+                } else if (htmlText) {
+                    addHtmlBlock(htmlText); handled = true;
+                } else if (plainText) {
+                    addHtmlBlock('<pre style="white-space:pre-wrap;margin:0;">' + escapeHtml(plainText) + '</pre>'); handled = true;
+                }
+            }
             return handled;
         }
 
         async function handlePaste(e) {
             const dt = e.clipboardData || window.clipboardData;
             if (!dt) return;
-
-            processClipboardItems(dt.items);
+            await processClipboardPayload(dt.items);
         }
 
         // 将 HTML 安全插入画廊；并尽量把 <img> 转为 dataURL，避免导出时跨域失效
