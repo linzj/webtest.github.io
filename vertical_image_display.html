@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 
 <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
     <!-- Markdown renderer -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -38,8 +39,7 @@
         }
 
         .gallery {
-            width: 100%;
-            max-width: 800px;
+            width: 800px;
             margin: 20px auto;
             display: flex;
             flex-direction: column;
@@ -140,6 +140,58 @@
             background: #fafafa;
             /* subtle zebra */
         }
+
+        #paste-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 9999;
+            background: rgba(0, 0, 0, .45);
+            display: none;
+            /* shown programmatically */
+            align-items: center;
+            justify-content: center;
+        }
+
+        #paste-overlay .overlay-box {
+            background: #fff;
+            border-radius: 10px;
+            padding: 16px;
+            width: min(600px, 92vw);
+            box-shadow: 0 8px 30px rgba(0, 0, 0, .2);
+        }
+
+        #paste-overlay .hint {
+            color: #555;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+
+        #paste-overlay .area {
+            min-height: 160px;
+            border: 1px dashed #999;
+            border-radius: 8px;
+            padding: 10px;
+            outline: none;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+        }
+
+        #paste-overlay .actions {
+            margin-top: 10px;
+            text-align: right;
+        }
+
+        #paste-overlay button {
+            padding: 8px 14px;
+            border: 0;
+            border-radius: 6px;
+            background: #e5e7eb;
+            cursor: pointer;
+        }
+
+        #paste-overlay button:hover {
+            background: #dcdfe3;
+        }
     </style>
 </head>
 
@@ -154,6 +206,18 @@
 
     <div class="controls">
         <button id="save-btn">生成并保存截图</button>
+        <button id="paste-btn">从剪贴板粘贴</button>
+    </div>
+
+    <!-- Fallback paste overlay (for iOS / restricted browsers) -->
+    <div id="paste-overlay" style="display:none;">
+        <div class="overlay-box">
+            <div class="hint">在下方区域长按 → 粘贴（完成后会自动插入并关闭）</div>
+            <div id="paste-area" class="area" contenteditable="true" spellcheck="false"></div>
+            <div class="actions">
+                <button id="paste-cancel">取消</button>
+            </div>
+        </div>
     </div>
 
     <div class="quality-control">
@@ -423,51 +487,124 @@
 
     </script>
     <script>
+        // Button: try to read from clipboard (images / HTML / RTF / text). Fallback to overlay.
+        const pasteBtn = document.getElementById('paste-btn');
+        const pasteOverlay = document.getElementById('paste-overlay');
+        const pasteArea = document.getElementById('paste-area');
+        const pasteCancel = document.getElementById('paste-cancel');
+        pasteBtn.addEventListener('click', async () => {
+            try {
+                // Rich path
+                if (navigator.clipboard && navigator.clipboard.read) {
+                    const items = await navigator.clipboard.read();
+                    if (await processClipboardItems(items)) return;
+                }
+
+                // Text-only fallback
+                if (navigator.clipboard && navigator.clipboard.readText) {
+                    const text = await navigator.clipboard.readText();
+                    if (text) {
+                        if (isProbablyMarkdown(text)) addMarkdownBlock(text);
+                        else addHtmlBlock('<pre style="white-space:pre-wrap;margin:0;">' + escapeHtml(text) + '</pre>');
+                        return;
+                    }
+                }
+
+                // Overlay fallback (iOS / blocked permissions)
+                openPasteOverlay();
+            } catch (err) {
+                console.warn('Clipboard read failed, using fallback overlay:', err);
+                openPasteOverlay();
+            }
+        });
+
+        function openPasteOverlay() {
+            pasteOverlay.style.display = 'flex';
+            // Focus the editable div so mobile shows paste handle
+            setTimeout(() => pasteArea.focus(), 0);
+        }
+
+        // Route the overlay’s paste to your existing handler, then close it
+        pasteArea.addEventListener('paste', (e) => {
+            e.stopPropagation(); // avoid double-handling by document listener
+            handlePaste(e);
+            closePasteOverlay();
+            // clear pasted content to avoid double rendering in the overlay box
+            requestAnimationFrame(() => { pasteArea.innerHTML = ''; });
+        });
+
+        pasteCancel.addEventListener('click', closePasteOverlay);
+        function closePasteOverlay() { pasteOverlay.style.display = 'none'; }
+
         // 全局启用粘贴（也可以改回只监听 dropZone）
         document.addEventListener('paste', handlePaste);
+        // Process rich clipboard items from navigator.clipboard.read()
+        // Returns true if something was handled/inserted.
+        async function processClipboardItems(items) {
+            let handled = false;
+
+            for (const item of items) {
+                // Prefer images first
+                const imgType = item.type.startsWith('image/') ? item.type : null;
+                if (imgType) {
+                    const blob = await item.getType(imgType);
+                    const file = new File([blob], `clipboard.${(imgType.split('/')[1] || 'png')}`, { type: imgType });
+                    handleFiles([file]);
+                    handled = true;
+                    continue;
+                }
+
+                const getItemAsString = async (item) => {
+                    const promise = new Promise((resolve) => {
+                        item.getAsString((s) => {
+                            resolve(s);
+                        });
+                    });
+                    return promise;
+                };
+
+                // RTF
+                if (item.type == 'text/rtf') {
+                    const rtf = await getItemAsString(item);
+                    addHtmlBlock(rtfToHtmlBasic(rtf));
+                    handled = true;
+                    continue;
+                }
+
+                // HTML
+                if (item.type == 'text/html') {
+                    const html = await getItemAsString(item);
+                    addHtmlBlock(html);
+                    handled = true;
+                    continue;
+                }
+
+                // RTF ➜ coarse HTML
+                if (item.type == 'text/rtf') {
+                    const rtf = await getItemAsString(item);
+                    addHtmlBlock(rtfToHtmlBasic(rtf));
+                    handled = true;
+                    continue;
+                }
+
+                // Plain text (Markdown detection)
+                if (item.type == 'text/plain') {
+                    const text = await getItemAsString(item);
+                    if (isProbablyMarkdown(text)) addMarkdownBlock(text);
+                    else addHtmlBlock('<pre style="white-space:pre-wrap;margin:0;">' + escapeHtml(text) + '</pre>');
+                    handled = true;
+                    continue;
+                }
+            }
+
+            return handled;
+        }
 
         async function handlePaste(e) {
             const dt = e.clipboardData || window.clipboardData;
             if (!dt) return;
 
-            // 1) 先处理剪贴板里的“图片文件”
-            const fileItems = [...dt.items].filter(it => it.kind === 'file' && it.type.startsWith('image/'));
-            if (fileItems.length) {
-                e.preventDefault();
-                const files = fileItems.map(it => it.getAsFile()).filter(Boolean);
-                if (files.length) handleFiles(files); // 复用你已有的图片压缩+预览流程
-                return;
-            }
-
-            const text = dt.getData('text/plain');
-            if (isProbablyMarkdown(text)) {
-                addMarkdownBlock(text);
-                return;
-            }
-
-            // 2) 再尝试 HTML（多数应用会在剪贴板里放 text/html）
-            const html = dt.getData('text/html');
-            if (html) {
-                e.preventDefault();
-                addHtmlBlock(html);   // 渲染到画廊
-                return;
-            }
-
-            // 3) 没有 HTML？试试 RTF（如 Word 只给了 RTF）
-            const rtf = dt.getData('text/rtf');
-            if (rtf) {
-                e.preventDefault();
-                // 简易 RTF->HTML（保底）；如需高保真可替换为第三方 RTF 解析库
-                const htmlFromRtf = rtfToHtmlBasic(rtf);
-                addHtmlBlock(htmlFromRtf);
-                return;
-            }
-
-            // 4) 最后兜底：纯文本
-            if (text) {
-                e.preventDefault();
-                addHtmlBlock('<pre style="white-space:pre-wrap;margin:0;">' + escapeHtml(text) + '</pre>');
-            }
+            processClipboardItems(dt.items);
         }
 
         // 将 HTML 安全插入画廊；并尽量把 <img> 转为 dataURL，避免导出时跨域失效
