@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <title>Paste → Print (Image-safe)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+    <style>
+        :root {
+            --w: 210mm;
+            --pad: 12mm
+        }
+
+        body {
+            margin: 0;
+            font: 14px/1.6 system-ui, Segoe UI, Arial, sans-serif;
+            display: grid;
+            place-items: center;
+            min-height: 100dvh;
+            background: #f5f6f8
+        }
+
+        .box {
+            background: #fff;
+            border: 1px solid #e5e7eb;
+            border-radius: 14px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, .06);
+            padding: 20px;
+            max-width: 720px;
+            margin: 24px
+        }
+
+        button {
+            appearance: none;
+            border: 1px solid #d1d5db;
+            background: #fff;
+            border-radius: 12px;
+            padding: 10px 14px;
+            font-weight: 600;
+            cursor: pointer
+        }
+
+        .err {
+            color: #b00020;
+            font-weight: 600
+        }
+
+        @page {
+            size: A4;
+            margin: 0
+        }
+    </style>
+</head>
+
+<body>
+    <div class="box">
+        <h1>Paste clipboard HTML → replace page</h1>
+        <p>Reads <code>text/html</code> from the clipboard, fixes image URLs, and rewrites the page for printing/saving.
+        </p>
+        <button id="paste">📋 Paste HTML</button>
+        <div id="msg" role="status" aria-live="polite" style="margin-top:10px"></div>
+        <details style="margin-top:10px">
+            <summary>Troubleshooting</summary>
+            <ul>
+                <li>Run on <strong>https://</strong> or <strong>localhost</strong> so clipboard read is allowed.</li>
+                <li>Images that were <code>blob:</code>/<code>cid:</code>/<code>file:</code> from the source tab/app
+                    usually can’t be reused outside it. Try copying from a page that uses absolute URLs or right-click
+                    “Copy image address”.</li>
+            </ul>
+        </details>
+    </div>
+
+    <script>
+        const msg = document.getElementById('msg');
+        document.getElementById('paste').addEventListener('click', async () => {
+            msg.textContent = 'Reading clipboard…';
+            try {
+                const { html, sourceUrl } = await readClipboardHTMLWithSource();
+                if (!html) {
+                    msg.innerHTML = '<span class="err">Clipboard had no HTML (plain text fallback skipped).</span>';
+                    return;
+                }
+
+                // Allow data:/blob: URIs and useful attributes like srcset/sizes
+                const sanitized = DOMPurify.sanitize(html, {
+                    ALLOWED_ATTR: [
+                        'style', 'class', 'id', 'href', 'src', 'srcset', 'sizes', 'alt', 'title',
+                        'width', 'height', 'colspan', 'rowspan', 'cellspacing', 'cellpadding', 'align', 'target', 'rel'
+                    ],
+                    ADD_TAGS: ['style'],
+                    ADD_DATA_URI_TAGS: ['img', 'source', 'video', 'audio'],
+                    ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel|data|blob):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i
+                });
+
+                // Build a document shell and inject content
+                const shell = makeShell(sanitized, sourceUrl);
+                document.open(); document.write(shell); document.close();
+
+            } catch (e) {
+                console.error(e);
+                msg.innerHTML = `<span class="err">Clipboard read failed: ${escapeHTML(String(e.message || e))}</span>`;
+            }
+        });
+
+        async function readClipboardHTMLWithSource() {
+            let html = '', plain = '', sourceUrl = '';
+            if (navigator.clipboard?.read) {
+                const items = await navigator.clipboard.read();
+                for (const it of items) {
+                    if (it.types.includes('text/html')) {
+                        const blob = await it.getType('text/html');
+                        html = await blob.text();
+                    } else if (it.types.includes('text/plain')) {
+                        const blob = await it.getType('text/plain');
+                        plain = await blob.text();
+                    }
+                }
+            } else if (navigator.clipboard?.readText) {
+                plain = await navigator.clipboard.readText();
+            }
+
+            // If we received CF_HTML with header, extract fragment + SourceURL
+            const parsed = parseCFHTML(html);
+            if (parsed) {
+                html = parsed.fragment || html;
+                sourceUrl = parsed.sourceUrl || '';
+            }
+
+            // Plain-text fallback (only if no HTML)
+            if (!html && plain) html = `<pre style="white-space:pre-wrap;margin:0">${escapeHTML(plain)}</pre>`;
+            return { html, sourceUrl };
+        }
+
+        function parseCFHTML(s) {
+            if (!s) return null;
+            // Heuristic: CF_HTML often begins with "Version:" and includes StartFragment/EndFragment/SourceURL
+            if (!/^Version:/i.test(s)) return null;
+            const srcMatch = s.match(/^\s*SourceURL:(.+)$/mi);
+            const start = Number((s.match(/StartFragment:(\d+)/i) || [])[1] || 0);
+            const end = Number((s.match(/EndFragment:(\d+)/i) || [])[1] || 0);
+            const fragment = (start && end) ? s.slice(start, end) : s;
+            return { fragment, sourceUrl: srcMatch ? srcMatch[1].trim() : '' };
+        }
+
+        function makeShell(contentHTML, sourceUrl) {
+            // Build a temp DOM to fix relative <img> src if we have a base
+            let fixedHTML = contentHTML;
+            if (sourceUrl) {
+                const tmp = document.implementation.createHTMLDocument('');
+                tmp.body.innerHTML = contentHTML;
+                const base = sourceUrl;
+                tmp.querySelectorAll('img[src]').forEach(img => {
+                    const src = img.getAttribute('src') || '';
+                    if (/^(?:https?:|data:|blob:|about:|mailto:|tel:)/i.test(src)) return;
+                    try { img.setAttribute('src', new URL(src, base).href); } catch { }
+                });
+                fixedHTML = tmp.body.innerHTML;
+            }
+
+            const baseTag = sourceUrl ? `<base href="${escapeAttr(sourceUrl)}">` : '';
+            const css = `
+:root{--w:210mm;--pad:12mm;--ink:#111}
+@page{size:A4;margin:0}
+html,body{height:auto;background:#fff}
+body{margin:0;color:var(--ink);font:14px/1.6 system-ui,Segoe UI,Arial,sans-serif}
+#toolbar{position:fixed;top:10px;right:10px;z-index:9999;display:flex;gap:8px}
+#toolbar button{appearance:none;border:1px solid #ccc;background:#fff;padding:8px 12px;border-radius:10px;cursor:pointer;font-weight:600;box-shadow:0 3px 12px rgba(0,0,0,.08)}
+#toolbar .hint{font-size:12px;margin-left:6px;opacity:.7;align-self:center}
+@media print{#toolbar{display:none}}
+main#print{width:var(--w);margin:0 auto;padding:var(--pad)}
+img,svg,video,canvas{max-width:100%;height:auto}
+table{border-collapse:collapse}
+a{color:inherit;text-decoration:underline}
+      `.trim();
+
+            return `
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Pasted Document</title>
+  ${baseTag}
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>${css}</style>
+</head>
+<body>
+  <div id="toolbar" aria-hidden="true">
+    <button onclick="window.print()">Print</button>
+    <button onclick="history.length?history.back():location.reload()">Back</button>
+    <span class="hint">Tip: Ctrl/Cmd+S to save</span>
+  </div>
+  <main id="print">
+    ${fixedHTML}
+  </main>
+</body>
+</html>`;
+        }
+
+        function escapeHTML(s) { return s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])) }
+        function escapeAttr(s) { return String(s).replace(/"/g, '&quot;') }
+    </script>
+</body>
+
+</html>
