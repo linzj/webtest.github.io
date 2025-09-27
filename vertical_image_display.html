@@ -240,6 +240,17 @@
         const fileInput = document.getElementById('file-input');
         const qualitySlider = document.getElementById('quality');
         const qualityValue = document.getElementById('quality-value');
+        const MAX_CANVAS_DIMENSION = 16384;
+
+        function computeExportScale(width, height) {
+            const baseScale = window.devicePixelRatio || 1;
+            const safeWidth = Math.max(width, 1);
+            const safeHeight = Math.max(height, 1);
+            const maxScaleByWidth = MAX_CANVAS_DIMENSION / safeWidth;
+            const maxScaleByHeight = MAX_CANVAS_DIMENSION / safeHeight;
+            const scale = Math.min(baseScale, maxScaleByWidth, maxScaleByHeight, 4);
+            return Number.isFinite(scale) && scale > 0 ? scale : 1;
+        }
 
         // Add click handler to drop-zone
         dropZone.addEventListener('click', () => {
@@ -364,17 +375,20 @@
                 await waitForImages(tempGallery);
 
                 // 若内容极长，可能超过浏览器画布上限，走分页导出
-                const MAX_DIM = 16384; // 保守阈值
                 const naturalHeight = tempGallery.scrollHeight;
 
-                if (naturalHeight > MAX_DIM) {
+                if (naturalHeight > MAX_CANVAS_DIMENSION) {
                     await exportInPages(tempGallery); // 见下方实现
                     return;
                 }
 
+                const contentWidth = tempGallery.scrollWidth || tempGallery.clientWidth || 800;
+                const exportScale = computeExportScale(contentWidth, naturalHeight);
+                console.info('[export] using scale', exportScale, 'for single canvas render');
+
                 const canvas = await html2canvas(tempGallery, {
                     useCORS: true,
-                    scale: 1,
+                    scale: exportScale,
                     logging: false,
                     backgroundColor: '#ffffff'
                 });
@@ -432,39 +446,66 @@
 
         async function exportInPages(container) {
             const children = [...container.children];
+            if (!children.length) return;
+
             const pageWidth = container.clientWidth || 800;
-            const MAX_DIM = 16384;
             const pagePadding = 0;
 
-            let pageCanvas = document.createElement('canvas');
-            let ctx = pageCanvas.getContext('2d');
-            pageCanvas.width = pageWidth;
-            pageCanvas.height = MAX_DIM; // 画布按最大高度建立，再按已用高度裁剪输出
+            const tallestBlock = children.reduce((maxHeight, block) => {
+                const rect = block.getBoundingClientRect();
+                return Math.max(maxHeight, rect.height);
+            }, 0) || container.scrollHeight || 1;
 
+            const pageScale = computeExportScale(pageWidth, tallestBlock);
+            console.info('[export] page render using scale', pageScale);
+            const scaledPageWidth = Math.max(1, Math.round(pageWidth * pageScale));
+
+            const createBlankPage = () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = scaledPageWidth;
+                canvas.height = MAX_CANVAS_DIMENSION; // 画布按最大高度建立，再按已用高度裁剪输出
+                const context = canvas.getContext('2d');
+                context.fillStyle = '#ffffff';
+                context.fillRect(0, 0, canvas.width, canvas.height);
+                return { canvas, context };
+            };
+
+            let { canvas: pageCanvas, context: ctx } = createBlankPage();
             let y = 0;
             let pageIndex = 1;
 
             for (const block of children) {
                 // 为确保样式一致，针对 block 渲染
-                const blockCanvas = await html2canvas(block, {
+                let blockCanvas = await html2canvas(block, {
                     useCORS: true,
-                    scale: 1,
+                    scale: pageScale,
                     logging: false,
                     backgroundColor: '#ffffff',
                     // foreignObjectRendering: true // 如需尝试更好富文本，但兼容性略差
                 });
 
-                // 如果当前页放不下，就先导出当前页，再开新页
-                if (y + blockCanvas.height > MAX_DIM) {
-                    // 裁剪导出当前页有效区域
-                    await downloadCanvasPng(cropCanvas(pageCanvas, pageWidth, y), `gallery_page_${pageIndex}.png`, parseInt(qualitySlider.value, 10) / 100);
+                if (blockCanvas.height > MAX_CANVAS_DIMENSION) {
+                    const rect = block.getBoundingClientRect();
+                    const fallbackScale = computeExportScale(pageWidth, rect.height);
+                    console.info('[export] fallback render using scale', fallbackScale);
+                    if (fallbackScale < pageScale) {
+                        blockCanvas = await html2canvas(block, {
+                            useCORS: true,
+                            scale: fallbackScale,
+                            logging: false,
+                            backgroundColor: '#ffffff',
+                        });
+                    }
+                }
 
-                    // 新开一页
-                    pageIndex++;
-                    pageCanvas = document.createElement('canvas');
-                    ctx = pageCanvas.getContext('2d');
-                    pageCanvas.width = pageWidth;
-                    pageCanvas.height = MAX_DIM;
+                // 如果当前页放不下，就先导出当前页，再开新页
+                if (y + blockCanvas.height > MAX_CANVAS_DIMENSION) {
+                    if (y > 0) {
+                        await downloadCanvasAsPng(cropCanvas(pageCanvas, pageCanvas.width, y), `gallery_page_${pageIndex}.png`, parseInt(qualitySlider.value, 10) / 100);
+                        pageIndex++;
+                    }
+
+                    ({ canvas: pageCanvas, context: ctx } = createBlankPage());
                     y = 0;
                 }
 
@@ -474,7 +515,7 @@
 
             // 导出最后一页（如果有内容）
             if (y > 0) {
-                await downloadCanvasAsPng(cropCanvas(pageCanvas, pageWidth, y), `gallery_page_${pageIndex}.png`, parseInt(qualitySlider.value, 10) / 100);
+                await downloadCanvasAsPng(cropCanvas(pageCanvas, pageCanvas.width, y), `gallery_page_${pageIndex}.png`, parseInt(qualitySlider.value, 10) / 100);
             }
 
             function cropCanvas(src, w, h) {
