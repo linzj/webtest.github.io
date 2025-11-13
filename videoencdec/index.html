@@ -1,12 +1,4 @@
-<!DOCTYPE html>
-<html lang="en">
-
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Video Encoder/Decoder</title>
-    <style>
-        body {
+<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Video Encoder/Decoder</title><style>body {
             font-family: Arial, sans-serif;
             margin: 20px;
         }
@@ -137,71 +129,4 @@
 
         #loadingOverlay.hidden {
             display: none;
-        }
-    </style>
-</head>
-
-<body>
-    <div id="loadingOverlay">
-        <div>Loading application...</div>
-    </div>
-    <h1>Video Frame Processor</h1>
-    <input type="file" id="videoInput" accept="video/*" disabled>
-    <div class="time-selection-toggle">
-        <label>
-            <input type="radio" name="timeSelection" value="manual" checked disabled> Manual Time Input
-        </label>
-        <label>
-            <input type="radio" name="timeSelection" value="slider" disabled> Frame Slider
-        </label>
-    </div>
-
-    <div class="time-inputs visible"> <!-- Added visible class since manual is checked by default -->
-        <label>Start Time: <input type="text" id="startTime" value="00:00" pattern="[0-9]{2}:[0-9]{2}" disabled></label>
-        <label>End Time: <input type="text" id="endTime" value="00:00" pattern="[0-9]{2}:[0-9]{2}" disabled></label>
-    </div>
-    <div class="slider-container">
-        <div class="double-slider">
-            <div class="slider-track"></div>
-            <div class="slider-range"></div>
-            <div class="slider-thumb" id="thumbStart"></div>
-            <div class="slider-thumb" id="thumbEnd"></div>
-        </div>
-        <div class="frame-info">
-            Start Frame: <span id="startFrame">0</span>
-            End Frame: <span id="endFrame">0</span>
-            Total Frames: <span id="totalFrames">0</span>
-        </div>
-    </div>
-
-    <div class="timestamp-controls">
-        <label>
-            <input type="checkbox" id="enableTimestamp" checked disabled>
-            Enable Timestamp
-        </label>
-        <div id="timestampInputs" class="timestamp-inputs visible">
-            <label>Timestamp Start: <input type="text" id="timestampStart" placeholder="YYYY-MM-DD HH:MM:SS" disabled></label>
-        </div>
-        <div class="zoom-control" style="margin-top: 10px;">
-            <label>Zoom: <span id="zoomValue">100%</span></label>
-            <input type="range" id="zoomSlider" min="10" max="100" value="100" style="width: 200px;" disabled>
-        </div>
-        <!-- Rotation controls -->
-        <div class="rotation-control" style="margin-top: 10px;">
-            <label>Rotation:</label>
-            <button id="rotateCW" disabled>CW</button>
-            <button id="rotateCCW" disabled>CCW</button>
-        </div>
-    </div>
-
-    <div id="status">Select a video file to begin processing</div>
-    <div id="frameCount">Processed frames: 0 / 0</div>
-    <button id="processButton" disabled>Process Video</button>
-    <div id="canvasContainer" style="margin-top: 20px;">
-        <canvas id="processorCanvas"></canvas>
-    </div>
-
-    <script src="dist/bundle.js" type="text/javascript"></script> <!-- Added type attribute -->
-</body>
-
-</html>
+        }</style></head><body><div id="loadingOverlay"><div>Loading application...</div></div><h1>Video Frame Processor</h1><input type="file" id="videoInput" accept="video/*" disabled="disabled"><div class="time-selection-toggle"><label><input type="radio" name="timeSelection" value="manual" checked="checked" disabled="disabled"> Manual Time Input</label> <label><input type="radio" name="timeSelection" value="slider" disabled="disabled"> Frame Slider</label></div><div class="time-inputs visible"><label>Start Time: <input id="startTime" value="00:00" pattern="[0-9]{2}:[0-9]{2}" disabled="disabled"></label> <label>End Time: <input id="endTime" value="00:00" pattern="[0-9]{2}:[0-9]{2}" disabled="disabled"></label></div><div class="slider-container"><div class="double-slider"><div class="slider-track"></div><div class="slider-range"></div><div class="slider-thumb" id="thumbStart"></div><div class="slider-thumb" id="thumbEnd"></div></div><div class="frame-info">Start Frame: <span id="startFrame">0</span> End Frame: <span id="endFrame">0</span> Total Frames: <span id="totalFrames">0</span></div></div><div class="timestamp-controls"><label><input type="checkbox" id="enableTimestamp" checked="checked" disabled="disabled"> Enable Timestamp</label><div id="timestampInputs" class="timestamp-inputs visible"><label>Timestamp Start: <input id="timestampStart" placeholder="YYYY-MM-DD HH:MM:SS" disabled="disabled"></label></div><div class="zoom-control" style="margin-top: 10px;"><label>Zoom: <span id="zoomValue">100%</span></label> <input type="range" id="zoomSlider" min="10" max="100" value="100" style="width: 200px;" disabled="disabled"></div><div class="rotation-control" style="margin-top: 10px;"><label>Rotation:</label> <button id="rotateCW" disabled="disabled">CW</button> <button id="rotateCCW" disabled="disabled">CCW</button></div></div><div id="status">Select a video file to begin processing</div><div id="frameCount">Processed frames: 0 / 0</div><button id="processButton" disabled="disabled">Process Video</button><div id="canvasContainer" style="margin-top: 20px;"><canvas id="processorCanvas"></canvas></div><script defer="defer" src="runtime.43c95fc0a0c4e2422561.js"></script><script defer="defer" src="vendors.79a3d1a26c2a85d3e0a4.js"></script><script defer="defer" src="main.254e13aabcf49ca0dd2f.js"></script></body></html>
