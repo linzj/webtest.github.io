@@ -63,6 +63,42 @@
             box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
         }
 
+        .gallery-item {
+            position: relative;
+            display: inline-block;
+        }
+
+        .delete-btn {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            width: 24px;
+            height: 24px;
+            border: none;
+            border-radius: 50%;
+            background-color: rgba(255, 0, 0, 0.7);
+            color: white;
+            font-size: 16px;
+            line-height: 24px;
+            text-align: center;
+            cursor: pointer;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+        .gallery-item:hover .delete-btn,
+        .rich-block:hover .delete-btn {
+            opacity: 1;
+        }
+
+        .delete-btn:hover {
+            background-color: rgba(255, 0, 0, 0.9);
+        }
+
+        .rich-block {
+            position: relative;
+        }
+
         .controls {
             width: 100%;
             max-width: 800px;
@@ -335,11 +371,23 @@
                     // Draw and compress
                     ctx.drawImage(img, 0, 0, width, height);
 
-                    // Create compressed image element
+                    // Create compressed image element with delete button
+                    const wrapper = document.createElement('div');
+                    wrapper.className = 'gallery-item';
+
                     const compressedImg = document.createElement('img');
                     compressedImg.src = canvas.toDataURL('image/png');
                     compressedImg.alt = file.name;
-                    gallery.appendChild(compressedImg);
+
+                    const deleteBtn = document.createElement('button');
+                    deleteBtn.className = 'delete-btn';
+                    deleteBtn.textContent = '×';
+                    deleteBtn.title = '删除此图片';
+                    deleteBtn.addEventListener('click', () => wrapper.remove());
+
+                    wrapper.appendChild(compressedImg);
+                    wrapper.appendChild(deleteBtn);
+                    gallery.appendChild(wrapper);
                 };
             }
         }
@@ -347,6 +395,9 @@
         // 生成并保存截图（展开滚动、等待图片、单路径导出）
         saveBtn.addEventListener('click', async () => {
             const tempGallery = gallery.cloneNode(true);
+
+            // 移除克隆中的删除按钮，避免出现在截图中
+            tempGallery.querySelectorAll('.delete-btn').forEach(btn => btn.remove());
 
             // 展开克隆：去掉滚动/高度限制，确保整块内容渲染
             Object.assign(tempGallery.style, {
@@ -682,6 +733,14 @@
             const wrapper = document.createElement('div');
             wrapper.className = 'rich-block';
             wrapper.innerHTML = cleaned;
+
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'delete-btn';
+            deleteBtn.textContent = '×';
+            deleteBtn.title = '删除此内容';
+            deleteBtn.addEventListener('click', () => wrapper.remove());
+            wrapper.appendChild(deleteBtn);
+
             gallery.appendChild(wrapper);
             inlineImages(wrapper);  // 尝试把远程图转 dataURL（受 CORS 限制，尽力而为）
         }
@@ -755,6 +814,14 @@
             wrapper.className = 'rich-block md-block';
             wrapper.innerHTML = cleaned;
             postProcessLinks(wrapper);
+
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'delete-btn';
+            deleteBtn.textContent = '×';
+            deleteBtn.title = '删除此内容';
+            deleteBtn.addEventListener('click', () => wrapper.remove());
+            wrapper.appendChild(deleteBtn);
+
             gallery.appendChild(wrapper);
             inlineImages(wrapper);
         }
