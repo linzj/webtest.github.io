@@ -1,0 +1,1088 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>眨眼提醒助手</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4/face_mesh.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3/drawing_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            text-align: center;
+            padding: 30px 0;
+        }
+
+        header h1 {
+            font-size: 2.5rem;
+            background: linear-gradient(90deg, #00d4ff, #7b2cbf);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+        }
+
+        header p {
+            color: #888;
+            font-size: 1.1rem;
+        }
+
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 400px;
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        @media (max-width: 1024px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .panel {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .panel-title {
+            font-size: 1.2rem;
+            margin-bottom: 15px;
+            color: #00d4ff;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .video-container {
+            position: relative;
+            width: 100%;
+            border-radius: 12px;
+            overflow: hidden;
+            background: #000;
+            aspect-ratio: 4/3;
+        }
+
+        #input_video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+        }
+
+        #output_canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            transform: scaleX(-1);
+        }
+
+        .camera-placeholder {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: #666;
+        }
+
+        .camera-placeholder svg {
+            width: 80px;
+            height: 80px;
+            margin-bottom: 15px;
+            opacity: 0.5;
+        }
+
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .control-group label {
+            font-size: 0.9rem;
+            color: #aaa;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .control-group label span {
+            color: #00d4ff;
+            font-weight: bold;
+        }
+
+        .toggle-switch {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+        }
+
+        .toggle-switch input {
+            display: none;
+        }
+
+        .toggle-slider {
+            width: 50px;
+            height: 26px;
+            background: #444;
+            border-radius: 13px;
+            position: relative;
+            transition: background 0.3s;
+        }
+
+        .toggle-slider::after {
+            content: '';
+            position: absolute;
+            width: 22px;
+            height: 22px;
+            background: #fff;
+            border-radius: 50%;
+            top: 2px;
+            left: 2px;
+            transition: transform 0.3s;
+        }
+
+        .toggle-switch input:checked + .toggle-slider {
+            background: #00d4ff;
+        }
+
+        .toggle-switch input:checked + .toggle-slider::after {
+            transform: translateX(24px);
+        }
+
+        .toggle-label {
+            font-size: 0.95rem;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            height: 8px;
+            border-radius: 4px;
+            background: #333;
+            outline: none;
+            -webkit-appearance: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #00d4ff;
+            cursor: pointer;
+        }
+
+        input[type="range"]::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #00d4ff;
+            cursor: pointer;
+            border: none;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #00d4ff, #7b2cbf);
+            color: #fff;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(0, 212, 255, 0.3);
+        }
+
+        .btn-danger {
+            background: linear-gradient(135deg, #ff4757, #c44569);
+            color: #fff;
+        }
+
+        .btn-danger:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(255, 71, 87, 0.3);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .stat-card {
+            background: rgba(0, 212, 255, 0.1);
+            border-radius: 12px;
+            padding: 15px;
+            text-align: center;
+            border: 1px solid rgba(0, 212, 255, 0.2);
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #00d4ff;
+        }
+
+        .stat-label {
+            font-size: 0.85rem;
+            color: #888;
+            margin-top: 5px;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 200px;
+            margin-top: 15px;
+        }
+
+        .alert-box {
+            background: rgba(255, 71, 87, 0.1);
+            border: 1px solid rgba(255, 71, 87, 0.3);
+            border-radius: 12px;
+            padding: 15px;
+            margin-top: 15px;
+            display: none;
+        }
+
+        .alert-box.show {
+            display: block;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        .alert-box h3 {
+            color: #ff4757;
+            font-size: 1.1rem;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .tips-container {
+            margin-top: 15px;
+        }
+
+        .tip-card {
+            background: rgba(123, 44, 191, 0.1);
+            border: 1px solid rgba(123, 44, 191, 0.2);
+            border-radius: 10px;
+            padding: 12px;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+        }
+
+        .tip-icon {
+            font-size: 1.5rem;
+            flex-shrink: 0;
+        }
+
+        .tip-content h4 {
+            font-size: 0.95rem;
+            color: #7b2cbf;
+            margin-bottom: 4px;
+        }
+
+        .tip-content p {
+            font-size: 0.85rem;
+            color: #aaa;
+            line-height: 1.4;
+        }
+
+        .status-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            background: rgba(68, 68, 68, 0.5);
+        }
+
+        .status-indicator.active {
+            background: rgba(0, 212, 255, 0.2);
+            color: #00d4ff;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #666;
+        }
+
+        .status-indicator.active .status-dot {
+            background: #00d4ff;
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        .eye-status {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: bold;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(5px);
+        }
+
+        .eye-status.open {
+            background: rgba(0, 212, 255, 0.3);
+            color: #00d4ff;
+        }
+
+        .eye-status.closed {
+            background: rgba(255, 71, 87, 0.3);
+            color: #ff4757;
+        }
+
+        .user-match-section {
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            padding-top: 15px;
+            margin-top: 15px;
+        }
+
+        .user-id-display {
+            background: rgba(0, 212, 255, 0.1);
+            border-radius: 8px;
+            padding: 10px;
+            margin-top: 10px;
+            font-family: monospace;
+            font-size: 0.85rem;
+            color: #00d4ff;
+            word-break: break-all;
+        }
+
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .loading-overlay.show {
+            display: flex;
+        }
+
+        .loading-spinner {
+            width: 60px;
+            height: 60px;
+            border: 4px solid rgba(0, 212, 255, 0.3);
+            border-top-color: #00d4ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            margin-top: 20px;
+            color: #00d4ff;
+        }
+    </style>
+</head>
+<body>
+    <div class="loading-overlay" id="loadingOverlay">
+        <div style="text-align: center;">
+            <div class="loading-spinner"></div>
+            <p class="loading-text">正在加载模型...</p>
+        </div>
+    </div>
+
+    <div class="container">
+        <header>
+            <h1>👁️ 眨眼提醒助手</h1>
+            <p>保护眼睛，从规律眨眼开始</p>
+        </header>
+
+        <div class="main-grid">
+            <div class="left-column">
+                <div class="panel">
+                    <h2 class="panel-title">
+                        <span>📹</span>
+                        摄像头预览
+                        <span class="status-indicator" id="statusIndicator">
+                            <span class="status-dot"></span>
+                            <span id="statusText">未启动</span>
+                        </span>
+                    </h2>
+                    <div class="video-container">
+                        <video id="input_video" autoplay playsinline></video>
+                        <canvas id="output_canvas"></canvas>
+                        <div class="camera-placeholder" id="cameraPlaceholder">
+                            <svg viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M12 15.5A3.5 3.5 0 0 1 8.5 12 3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.64.07-.97 0-.33-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.3-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65C14.46 2.18 14.25 2 14 2h-4c-.25 0-.46.18-.5.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1c-.23-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64l2.11 1.63c-.04.34-.07.67-.07 1 0 .33.03.66.07.97l-2.11 1.63c-.19.15-.24.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1c.23.09.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.63Z"/>
+                            </svg>
+                            <p>点击"启动检测"开始使用</p>
+                        </div>
+                        <div class="eye-status" id="eyeStatus" style="display: none;">眼睛: 检测中</div>
+                    </div>
+                </div>
+
+                <div class="panel" style="margin-top: 20px;">
+                    <h2 class="panel-title">
+                        <span>📊</span>
+                        眨眼统计
+                    </h2>
+                    <div class="chart-container">
+                        <canvas id="blinkChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="right-column">
+                <div class="panel">
+                    <h2 class="panel-title">
+                        <span>⚙️</span>
+                        控制面板
+                    </h2>
+
+                    <div class="controls">
+                        <button class="btn btn-primary" id="startBtn">
+                            <span>▶️</span> 启动检测
+                        </button>
+                        <button class="btn btn-danger" id="stopBtn" disabled>
+                            <span>⏹️</span> 停止识别
+                        </button>
+
+                        <div class="control-group">
+                            <label>眨眼检测阈值: <span id="thresholdValue">0.25</span></label>
+                            <input type="range" id="thresholdSlider" min="0.1" max="0.5" step="0.01" value="0.25">
+                            <small style="color: #666; font-size: 0.8rem;">
+                                数值越小越容易检测到眨眼，建议根据环境光调整
+                            </small>
+                        </div>
+
+                        <div class="control-group">
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="userMatchToggle">
+                                <span class="toggle-slider"></span>
+                                <span class="toggle-label">启用用户识别 (消耗更多算力)</span>
+                            </label>
+                        </div>
+
+                        <div class="control-group">
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="soundToggle" checked>
+                                <span class="toggle-slider"></span>
+                                <span class="toggle-label">启用提醒音效</span>
+                            </label>
+                        </div>
+
+                        <div class="user-match-section" id="userMatchSection" style="display: none;">
+                            <label style="font-size: 0.9rem; color: #aaa; margin-bottom: 8px; display: block;">
+                                当前用户ID
+                            </label>
+                            <div class="user-id-display" id="userIdDisplay">未识别</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="panel" style="margin-top: 20px;">
+                    <h2 class="panel-title">
+                        <span>📈</span>
+                        实时数据
+                    </h2>
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-value" id="totalBlinks">0</div>
+                            <div class="stat-label">总眨眼次数</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="blinkRate">0</div>
+                            <div class="stat-label">每分钟眨眼</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="lastBlinkTime">--</div>
+                            <div class="stat-label">上次眨眼(秒)</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="avgBlinkRate">0</div>
+                            <div class="stat-label">平均频率</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="alert-box" id="alertBox">
+                    <h3>⚠️ 眨眼提醒</h3>
+                    <p id="alertText">您已经很久没有眨眼了，请眨眨眼保护眼睛！</p>
+                </div>
+
+                <div class="panel" style="margin-top: 20px;">
+                    <h2 class="panel-title">
+                        <span>💡</span>
+                        护眼小贴士
+                    </h2>
+                    <div class="tips-container" id="tipsContainer">
+                        <!-- Tips will be inserted here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==================== 配置和状态 ====================
+        const CONFIG = {
+            EAR_THRESHOLD: 0.25,        // 眼睛纵横比阈值
+            BLINK_MIN_FRAMES: 2,        // 最小眨眼帧数
+            BLINK_MAX_FRAMES: 10,       // 最大眨眼帧数
+            ALERT_INTERVAL: 8000,       // 提醒间隔(8秒不眨眼提醒)
+            CHART_INTERVAL: 30000,      // 图表更新间隔(30秒)
+            HISTORY_SIZE: 20            // 图表历史数据点数量
+        };
+
+        const STATE = {
+            isRunning: false,
+            isUserMatchEnabled: false,
+            isSoundEnabled: true,
+            blinkCount: 0,
+            blinkHistory: [],           // 每个时间段的眨眼次数
+            lastBlinkTime: Date.now(),
+            lastChartUpdate: Date.now(),
+            blinkTimestamps: [],        // 记录所有眨眼时间戳
+            eyeClosedFrames: 0,
+            isEyeClosed: false,
+            currentUserId: null,
+            frameCount: 0
+        };
+
+        // ==================== MediaPipe 初始化 ====================
+        const videoElement = document.getElementById('input_video');
+        const canvasElement = document.getElementById('output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+
+        let faceMesh = null;
+        let camera = null;
+
+        // 眼睛关键点索引 (MediaPipe Face Mesh)
+        const LEFT_EYE_INDICES = [362, 385, 387, 263, 373, 380];
+        const RIGHT_EYE_INDICES = [33, 160, 158, 133, 153, 144];
+
+        // ==================== 健康提示 ====================
+        const HEALTH_TIPS = [
+            { icon: '💧', title: '20-20-20 法则', text: '每20分钟，看20英尺(6米)外的物体20秒' },
+            { icon: '😉', title: '完全眨眼', text: '缓慢完全地眨眼，让泪液均匀分布在眼球表面' },
+            { icon: '💧', title: '保持湿润', text: '长时间用眼会导致眼睛干涩，记得多喝水' },
+            { icon: '📏', title: '保持距离', text: '眼睛与屏幕保持50-70厘米的距离' },
+            { icon: '💡', title: '环境光线', text: '避免屏幕反光，保持适当的环境光线' },
+            { icon: '😴', title: '适当休息', text: '每2小时闭眼休息5-10分钟' }
+        ];
+
+        // ==================== 初始化 ====================
+        function init() {
+            renderTips();
+            initChart();
+            bindEvents();
+        }
+
+        function renderTips() {
+            const container = document.getElementById('tipsContainer');
+            container.innerHTML = HEALTH_TIPS.map(tip => `
+                <div class="tip-card">
+                    <span class="tip-icon">${tip.icon}</span>
+                    <div class="tip-content">
+                        <h4>${tip.title}</h4>
+                        <p>${tip.text}</p>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // ==================== 图表 ====================
+        let blinkChart = null;
+
+        function initChart() {
+            const ctx = document.getElementById('blinkChart').getContext('2d');
+            blinkChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: '眨眼次数',
+                        data: [],
+                        borderColor: '#00d4ff',
+                        backgroundColor: 'rgba(0, 212, 255, 0.1)',
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.4
+                    }, {
+                        label: '眨眼频率(次/分)',
+                        data: [],
+                        borderColor: '#7b2cbf',
+                        backgroundColor: 'rgba(123, 44, 191, 0.1)',
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.4,
+                        yAxisID: 'y1'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        intersect: false,
+                        mode: 'index'
+                    },
+                    plugins: {
+                        legend: {
+                            labels: { color: '#aaa' }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            ticks: { color: '#888' },
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' }
+                        },
+                        y: {
+                            ticks: { color: '#888' },
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            beginAtZero: true
+                        },
+                        y1: {
+                            ticks: { color: '#888' },
+                            grid: { display: false },
+                            beginAtZero: true,
+                            position: 'right'
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateChart() {
+            const now = Date.now();
+            if (now - STATE.lastChartUpdate >= CONFIG.CHART_INTERVAL) {
+                const timeLabel = new Date().toLocaleTimeString('zh-CN', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                });
+
+                // 计算这30秒内的眨眼次数
+                const periodBlinks = STATE.blinkTimestamps.filter(
+                    t => t >= STATE.lastChartUpdate && t <= now
+                ).length;
+
+                // 计算眨眼频率(次/分)
+                const blinkRate = Math.round(periodBlinks * 2); // 30秒 * 2 = 每分钟
+
+                STATE.blinkHistory.push({ time: timeLabel, count: periodBlinks, rate: blinkRate });
+
+                // 保持历史数据在限制范围内
+                if (STATE.blinkHistory.length > CONFIG.HISTORY_SIZE) {
+                    STATE.blinkHistory.shift();
+                }
+
+                // 更新图表
+                blinkChart.data.labels = STATE.blinkHistory.map(h => h.time);
+                blinkChart.data.datasets[0].data = STATE.blinkHistory.map(h => h.count);
+                blinkChart.data.datasets[1].data = STATE.blinkHistory.map(h => h.rate);
+                blinkChart.update();
+
+                STATE.lastChartUpdate = now;
+
+                // 清理旧的时间戳
+                STATE.blinkTimestamps = STATE.blinkTimestamps.filter(
+                    t => t > now - CONFIG.CHART_INTERVAL * CONFIG.HISTORY_SIZE
+                );
+            }
+        }
+
+        // ==================== 人脸/眼睛检测 ====================
+        async function initFaceMesh() {
+            faceMesh = new FaceMesh({
+                locateFile: (file) => {
+                    return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
+                }
+            });
+
+            faceMesh.setOptions({
+                maxNumFaces: 1,
+                refineLandmarks: true,
+                minDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5
+            });
+
+            faceMesh.onResults(onResults);
+        }
+
+        function onResults(results) {
+            STATE.frameCount++;
+
+            // 清空画布
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+
+            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+                const landmarks = results.multiFaceLandmarks[0];
+
+                // 绘制人脸网格
+                drawConnectors(canvasCtx, landmarks, FACEMESH_TESSELATION,
+                    { color: 'rgba(0, 212, 255, 0.3)', lineWidth: 1 });
+
+                // 绘制眼睛轮廓
+                drawConnectors(canvasCtx, landmarks, FACEMESH_LEFT_EYE,
+                    { color: '#00d4ff', lineWidth: 2 });
+                drawConnectors(canvasCtx, landmarks, FACEMESH_RIGHT_EYE,
+                    { color: '#00d4ff', lineWidth: 2 });
+
+                // 检测眨眼
+                detectBlink(landmarks);
+
+                // 用户识别
+                if (STATE.isUserMatchEnabled) {
+                    updateUserIdentification(landmarks);
+                }
+            } else {
+                document.getElementById('eyeStatus').style.display = 'none';
+            }
+
+            canvasCtx.restore();
+
+            // 更新统计数据
+            updateStats();
+            updateChart();
+            checkAlert();
+        }
+
+        function detectBlink(landmarks) {
+            // 计算左眼纵横比 (Eye Aspect Ratio)
+            const leftEAR = calculateEAR(landmarks, LEFT_EYE_INDICES);
+            const rightEAR = calculateEAR(landmarks, RIGHT_EYE_INDICES);
+            const avgEAR = (leftEAR + rightEAR) / 2;
+
+            // 获取阈值
+            const threshold = parseFloat(document.getElementById('thresholdSlider').value);
+
+            // 更新眼睛状态显示
+            const eyeStatusEl = document.getElementById('eyeStatus');
+            eyeStatusEl.style.display = 'block';
+
+            if (avgEAR < threshold) {
+                // 眼睛闭合
+                STATE.eyeClosedFrames++;
+                STATE.isEyeClosed = true;
+                eyeStatusEl.textContent = '眼睛: 闭合';
+                eyeStatusEl.className = 'eye-status closed';
+            } else {
+                // 眼睛睁开
+                if (STATE.isEyeClosed && STATE.eyeClosedFrames >= CONFIG.BLINK_MIN_FRAMES
+                    && STATE.eyeClosedFrames <= CONFIG.BLINK_MAX_FRAMES) {
+                    // 有效的眨眼
+                    onBlinkDetected();
+                }
+                STATE.eyeClosedFrames = 0;
+                STATE.isEyeClosed = false;
+                eyeStatusEl.textContent = '眼睛: 睁开';
+                eyeStatusEl.className = 'eye-status open';
+            }
+        }
+
+        function calculateEAR(landmarks, indices) {
+            // 眼睛纵横比 = (垂直距离1 + 垂直距离2) / (2 * 水平距离)
+            const p1 = landmarks[indices[0]];
+            const p2 = landmarks[indices[1]];
+            const p3 = landmarks[indices[2]];
+            const p4 = landmarks[indices[3]];
+            const p5 = landmarks[indices[4]];
+            const p6 = landmarks[indices[5]];
+
+            const vertical1 = distance(p2, p6);
+            const vertical2 = distance(p3, p5);
+            const horizontal = distance(p1, p4);
+
+            return (vertical1 + vertical2) / (2 * horizontal);
+        }
+
+        function distance(p1, p2) {
+            return Math.sqrt(
+                Math.pow(p1.x - p2.x, 2) +
+                Math.pow(p1.y - p2.y, 2) +
+                Math.pow(p1.z - p2.z, 2)
+            );
+        }
+
+        function onBlinkDetected() {
+            STATE.blinkCount++;
+            STATE.blinkTimestamps.push(Date.now());
+            STATE.lastBlinkTime = Date.now();
+
+            // 播放音效
+            if (STATE.isSoundEnabled) {
+                playBeep(800, 50);
+            }
+
+            // 隐藏提醒
+            document.getElementById('alertBox').classList.remove('show');
+        }
+
+        function updateUserIdentification(landmarks) {
+            // 生成简化的面部特征指纹
+            // 使用面部关键点之间的距离比例来创建唯一标识
+            const keyPoints = [33, 133, 362, 263, 1, 152, 61, 291]; // 眼角、鼻尖等关键点
+            let fingerprint = '';
+
+            for (let i = 0; i < keyPoints.length; i++) {
+                for (let j = i + 1; j < keyPoints.length; j++) {
+                    const d = distance(landmarks[keyPoints[i]], landmarks[keyPoints[j]]);
+                    fingerprint += Math.round(d * 1000).toString(36);
+                }
+            }
+
+            // 哈希处理
+            const userId = hashString(fingerprint).substring(0, 16);
+            STATE.currentUserId = userId;
+            document.getElementById('userIdDisplay').textContent = userId;
+        }
+
+        function hashString(str) {
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                const char = str.charCodeAt(i);
+                hash = ((hash << 5) - hash) + char;
+                hash = hash & hash;
+            }
+            return Math.abs(hash).toString(16);
+        }
+
+        function updateStats() {
+            document.getElementById('totalBlinks').textContent = STATE.blinkCount;
+
+            // 计算每分钟眨眼率
+            const now = Date.now();
+            const oneMinuteAgo = now - 60000;
+            const recentBlinks = STATE.blinkTimestamps.filter(t => t > oneMinuteAgo).length;
+            document.getElementById('blinkRate').textContent = recentBlinks;
+
+            // 上次眨眼时间
+            const timeSinceLastBlink = Math.floor((now - STATE.lastBlinkTime) / 1000);
+            document.getElementById('lastBlinkTime').textContent = timeSinceLastBlink;
+
+            // 平均眨眼率
+            if (STATE.blinkHistory.length > 0) {
+                const avgRate = STATE.blinkHistory.reduce((sum, h) => sum + h.rate, 0) / STATE.blinkHistory.length;
+                document.getElementById('avgBlinkRate').textContent = Math.round(avgRate);
+            }
+        }
+
+        function checkAlert() {
+            const timeSinceLastBlink = Date.now() - STATE.lastBlinkTime;
+            const alertBox = document.getElementById('alertBox');
+
+            if (timeSinceLastBlink > CONFIG.ALERT_INTERVAL) {
+                alertBox.classList.add('show');
+
+                if (STATE.isSoundEnabled && timeSinceLastBlink % 2000 < 100) {
+                    playBeep(400, 100);
+                }
+
+                // 更新提示文本
+                const seconds = Math.floor(timeSinceLastBlink / 1000);
+                document.getElementById('alertText').textContent =
+                    `您已经 ${seconds} 秒没有眨眼了，请眨眨眼保护眼睛！`;
+            } else {
+                alertBox.classList.remove('show');
+            }
+        }
+
+        function playBeep(frequency, duration) {
+            try {
+                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const oscillator = audioCtx.createOscillator();
+                const gainNode = audioCtx.createGain();
+
+                oscillator.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+
+                oscillator.frequency.value = frequency;
+                oscillator.type = 'sine';
+
+                gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration / 1000);
+
+                oscillator.start(audioCtx.currentTime);
+                oscillator.stop(audioCtx.currentTime + duration / 1000);
+            } catch (e) {
+                console.log('Audio play failed:', e);
+            }
+        }
+
+        // ==================== 事件绑定 ====================
+        function bindEvents() {
+            // 启动按钮
+            document.getElementById('startBtn').addEventListener('click', async () => {
+                await startDetection();
+            });
+
+            // 停止按钮
+            document.getElementById('stopBtn').addEventListener('click', () => {
+                stopDetection();
+            });
+
+            // 阈值滑块
+            document.getElementById('thresholdSlider').addEventListener('input', (e) => {
+                document.getElementById('thresholdValue').textContent = e.target.value;
+            });
+
+            // 用户匹配开关
+            document.getElementById('userMatchToggle').addEventListener('change', (e) => {
+                STATE.isUserMatchEnabled = e.target.checked;
+                document.getElementById('userMatchSection').style.display =
+                    e.target.checked ? 'block' : 'none';
+            });
+
+            // 音效开关
+            document.getElementById('soundToggle').addEventListener('change', (e) => {
+                STATE.isSoundEnabled = e.target.checked;
+            });
+        }
+
+        async function startDetection() {
+            if (STATE.isRunning) return;
+
+            document.getElementById('loadingOverlay').classList.add('show');
+
+            try {
+                // 设置画布尺寸
+                canvasElement.width = 640;
+                canvasElement.height = 480;
+
+                // 初始化 Face Mesh
+                await initFaceMesh();
+
+                // 初始化摄像头
+                camera = new Camera(videoElement, {
+                    onFrame: async () => {
+                        await faceMesh.send({ image: videoElement });
+                    },
+                    width: 640,
+                    height: 480
+                });
+
+                await camera.start();
+
+                STATE.isRunning = true;
+                STATE.lastBlinkTime = Date.now();
+                STATE.lastChartUpdate = Date.now();
+
+                // 更新UI
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('stopBtn').disabled = false;
+                document.getElementById('cameraPlaceholder').style.display = 'none';
+                document.getElementById('statusIndicator').classList.add('active');
+                document.getElementById('statusText').textContent = '检测中';
+
+            } catch (error) {
+                console.error('启动失败:', error);
+                alert('启动失败，请确保允许摄像头访问权限');
+            } finally {
+                document.getElementById('loadingOverlay').classList.remove('show');
+            }
+        }
+
+        function stopDetection() {
+            if (!STATE.isRunning) return;
+
+            // 停止摄像头
+            if (camera) {
+                try {
+                    const stream = videoElement.srcObject;
+                    if (stream) {
+                        stream.getTracks().forEach(track => track.stop());
+                    }
+                } catch (e) {
+                    console.error('停止摄像头失败:', e);
+                }
+            }
+
+            STATE.isRunning = false;
+
+            // 更新UI
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').disabled = true;
+            document.getElementById('cameraPlaceholder').style.display = 'block';
+            document.getElementById('statusIndicator').classList.remove('active');
+            document.getElementById('statusText').textContent = '已停止';
+            document.getElementById('eyeStatus').style.display = 'none';
+
+            // 清空画布
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+        }
+
+        // ==================== 启动应用 ====================
+        window.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
