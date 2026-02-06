@@ -18,6 +18,8 @@ import {
   GPUTimestampHelper,
 } from "./benchmark.js";
 
+import { DEBUG_STAGES } from "./debug-stages.js";
+
 // ============================================================
 // Math utilities
 // ============================================================
@@ -230,6 +232,20 @@ const elScore1 = document.getElementById("score1");
 const elScore2 = document.getElementById("score2");
 const elScore3 = document.getElementById("score3");
 
+// Debug DOM refs
+const debugBtn = document.getElementById("debugBtn");
+const debugPickerScreen = document.getElementById("debugPickerScreen");
+const debugBackBtn = document.getElementById("debugBackBtn");
+const debugPanel = document.getElementById("debugPanel");
+const debugSceneName = document.getElementById("debugSceneName");
+const debugStepCounter = document.getElementById("debugStepCounter");
+const debugStageName = document.getElementById("debugStageName");
+const debugStageDesc = document.getElementById("debugStageDesc");
+const debugPrevBtn = document.getElementById("debugPrevBtn");
+const debugNextBtn = document.getElementById("debugNextBtn");
+const debugExitBtn = document.getElementById("debugExitBtn");
+const debugSceneCards = document.querySelectorAll(".debug-scene-card");
+
 // ============================================================
 // WebGPU Init
 // ============================================================
@@ -333,7 +349,7 @@ function showError(msg) {
 // ============================================================
 
 function createRayMarchScene() {
-  const uniformData = new Float32Array(4); // resolution.xy, time, pad
+  const uniformData = new Float32Array(4); // resolution.xy, time, debugMode(u32)
   const uniformBuffer = device.createBuffer({
     size: 16,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
@@ -359,14 +375,19 @@ function createRayMarchScene() {
     entries: [{ binding: 0, resource: { buffer: uniformBuffer } }],
   });
 
+  let debugModeValue = 0;
+
   return {
     name: "Ray March",
     primitiveCount: "1 quad (fullscreen)",
+    setDebugMode(val) {
+      debugModeValue = val;
+    },
     update(time) {
       uniformData[0] = canvas.width;
       uniformData[1] = canvas.height;
       uniformData[2] = time;
-      uniformData[3] = 0;
+      new Uint32Array(uniformData.buffer)[3] = debugModeValue;
       device.queue.writeBuffer(uniformBuffer, 0, uniformData);
     },
     render(encoder, textureView) {
@@ -527,10 +548,14 @@ function createParticleScene() {
 
   let pingPong = 0;
   const simParamData = new Float32Array(simParamSize / 4);
+  let debugModeValue = 0;
 
   return {
     name: "Particle Compute",
     primitiveCount: "1M particles",
+    setDebugMode(val) {
+      debugModeValue = val;
+    },
     update(time, dt) {
       // Sim params
       simParamData[0] = Math.min(dt, 0.05); // deltaTime capped
@@ -549,9 +574,10 @@ function createParticleScene() {
         simParamData[base + 3] = 15.0 + Math.sin(time + i) * 5.0; // strength
       }
 
-      // Fix: write numParticles as u32
+      // Fix: write numParticles and debugMode as u32
       const u32View = new Uint32Array(simParamData.buffer);
       u32View[2] = NUM_PARTICLES;
+      u32View[3] = debugModeValue;
 
       device.queue.writeBuffer(simParamBuffer, 0, simParamData);
 
@@ -711,10 +737,14 @@ function createGeometryScene() {
   });
 
   const triCount = (mesh.vertexCount / 3) * NUM_INSTANCES;
+  let debugModeValue = 0;
 
   return {
     name: "Geometry Stress",
     primitiveCount: (triCount / 1e6).toFixed(1) + "M tris",
+    setDebugMode(val) {
+      debugModeValue = val;
+    },
     _depthTexture: depthTexture,
     resize() {
       if (this._depthTexture) this._depthTexture.destroy();
@@ -746,6 +776,7 @@ function createGeometryScene() {
 
       const u32 = new Uint32Array(uniformData.buffer);
       u32[20] = NUM_INSTANCES;
+      u32[21] = debugModeValue;
 
       device.queue.writeBuffer(uniformBuffer, 0, uniformData);
 
@@ -929,6 +960,141 @@ function positionGraphCanvas() {
 }
 
 // ============================================================
+// Debug Mode
+// ============================================================
+
+let debugState = {
+  active: false,
+  sceneKey: null,
+  currentStageIndex: 0,
+  scene: null,
+  frozenTime: 5.0,
+};
+
+function enterDebugPicker() {
+  startScreen.classList.add("hidden");
+  scoreScreen.classList.add("hidden");
+  debugPickerScreen.classList.remove("hidden");
+}
+
+function startDebugScene(sceneKey) {
+  debugPickerScreen.classList.add("hidden");
+  overlay.classList.add("hidden");
+  debugPanel.classList.remove("hidden");
+  document.body.classList.add("debug-active");
+
+  // Cancel any running benchmark
+  if (animFrameId) {
+    cancelAnimationFrame(animFrameId);
+    animFrameId = null;
+  }
+
+  debugState.active = true;
+  debugState.sceneKey = sceneKey;
+  debugState.currentStageIndex = 0;
+
+  // Resize canvas for debug panel
+  resizeCanvas();
+
+  // Create the appropriate scene
+  if (sceneKey === "rayMarch") {
+    debugState.scene = createRayMarchScene();
+  } else if (sceneKey === "particleCompute") {
+    debugState.scene = createParticleScene();
+  } else if (sceneKey === "geometryStress") {
+    debugState.scene = createGeometryScene();
+  }
+
+  applyDebugStage();
+}
+
+function applyDebugStage() {
+  const stages = DEBUG_STAGES[debugState.sceneKey];
+  const stage = stages[debugState.currentStageIndex];
+  const total = stages.length;
+
+  // Update UI
+  debugSceneName.textContent = debugState.scene.name;
+  debugStepCounter.textContent = `${debugState.currentStageIndex + 1} / ${total}`;
+  debugStageName.textContent = stage.name;
+  debugStageDesc.textContent = stage.description;
+
+  // Update button states
+  debugPrevBtn.disabled = debugState.currentStageIndex === 0;
+  debugNextBtn.disabled = debugState.currentStageIndex === total - 1;
+
+  // Set debug mode on scene
+  debugState.scene.setDebugMode(stage.debugMode);
+
+  // Render frame
+  renderDebugFrame();
+}
+
+function renderDebugFrame() {
+  const scene = debugState.scene;
+  const sceneKey = debugState.sceneKey;
+
+  if (sceneKey === "particleCompute") {
+    // Particle scene needs multiple compute passes to reach a visually meaningful state
+    // Rebuild scene for consistent state
+    debugState.scene = createParticleScene();
+    const stages = DEBUG_STAGES[debugState.sceneKey];
+    const stage = stages[debugState.currentStageIndex];
+    debugState.scene.setDebugMode(stage.debugMode);
+    const freshScene = debugState.scene;
+
+    // Run ~60 compute+render iterations in a single submit to simulate 1 second
+    const dt = 1.0 / 60.0;
+    let simTime = debugState.frozenTime;
+    for (let i = 0; i < 60; i++) {
+      freshScene.update(simTime, dt);
+      simTime += dt;
+      const encoder = device.createCommandEncoder();
+      const textureView = context.getCurrentTexture().createView();
+      freshScene.render(encoder, textureView);
+      gpuTimer.resolve(encoder);
+      device.queue.submit([encoder.finish()]);
+    }
+  } else {
+    // Ray March / Geometry: single frame at frozen time
+    scene.update(debugState.frozenTime, 0.016);
+    const encoder = device.createCommandEncoder();
+    const textureView = context.getCurrentTexture().createView();
+    scene.render(encoder, textureView);
+    gpuTimer.resolve(encoder);
+    device.queue.submit([encoder.finish()]);
+  }
+}
+
+function debugNextStep() {
+  const stages = DEBUG_STAGES[debugState.sceneKey];
+  if (debugState.currentStageIndex < stages.length - 1) {
+    debugState.currentStageIndex++;
+    applyDebugStage();
+  }
+}
+
+function debugPrevStep() {
+  if (debugState.currentStageIndex > 0) {
+    debugState.currentStageIndex--;
+    applyDebugStage();
+  }
+}
+
+function exitDebugMode() {
+  debugState.active = false;
+  debugState.scene = null;
+  debugState.sceneKey = null;
+  debugState.currentStageIndex = 0;
+
+  debugPanel.classList.add("hidden");
+  document.body.classList.remove("debug-active");
+  startScreen.classList.remove("hidden");
+
+  resizeCanvas();
+}
+
+// ============================================================
 // Start / Restart
 // ============================================================
 
@@ -958,6 +1124,21 @@ async function startBenchmark() {
 startBtn.addEventListener("click", startBenchmark);
 restartBtn.addEventListener("click", startBenchmark);
 
+// Debug mode event listeners
+debugBtn.addEventListener("click", enterDebugPicker);
+debugBackBtn.addEventListener("click", () => {
+  debugPickerScreen.classList.add("hidden");
+  startScreen.classList.remove("hidden");
+});
+debugSceneCards.forEach((card) => {
+  card.addEventListener("click", () => {
+    startDebugScene(card.dataset.scene);
+  });
+});
+debugPrevBtn.addEventListener("click", debugPrevStep);
+debugNextBtn.addEventListener("click", debugNextStep);
+debugExitBtn.addEventListener("click", exitDebugMode);
+
 window.addEventListener("resize", () => {
   if (!device) return;
   resizeCanvas();
@@ -965,6 +1146,13 @@ window.addEventListener("resize", () => {
   // Recreate depth texture for geometry scene
   if (scenes[2] && scenes[2].resize) {
     scenes[2].resize();
+  }
+  // Re-render debug frame on resize
+  if (debugState.active && debugState.scene) {
+    if (debugState.scene.resize) {
+      debugState.scene.resize();
+    }
+    renderDebugFrame();
   }
 });
 

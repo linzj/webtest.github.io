@@ -60,6 +60,46 @@
       <h1>WebGPU Benchmark</h1>
       <p>3 stress test scenes &bull; 60 seconds total</p>
       <button id="startBtn">Start Benchmark</button>
+      <button id="debugBtn">Debug Mode</button>
+    </div>
+
+    <!-- Debug Scene Picker -->
+    <div id="debugPickerScreen" class="hidden">
+      <h2>Select a Scene to Debug</h2>
+      <div class="debug-picker-cards">
+        <div class="debug-scene-card" data-scene="rayMarch">
+          <h3>Ray March</h3>
+          <p>SDF ray marching with lighting, shadows, AO and reflections</p>
+        </div>
+        <div class="debug-scene-card" data-scene="particleCompute">
+          <h3>Particle Compute</h3>
+          <p>1M GPU-computed particles with attractors and turbulence</p>
+        </div>
+        <div class="debug-scene-card" data-scene="geometryStress">
+          <h3>Geometry PBR</h3>
+          <p>3000 instanced icospheres with 12-light PBR shading</p>
+        </div>
+      </div>
+      <button id="debugBackBtn">Back</button>
+    </div>
+
+    <!-- Debug Panel (bottom bar) -->
+    <div id="debugPanel" class="hidden">
+      <div class="debug-panel-content">
+        <div class="debug-panel-info">
+          <div class="debug-panel-header">
+            <span id="debugSceneName">Scene</span>
+            <span id="debugStepCounter">1 / 8</span>
+          </div>
+          <h3 id="debugStageName">Stage Name</h3>
+          <p id="debugStageDesc">Description text</p>
+        </div>
+        <div class="debug-panel-buttons">
+          <button id="debugPrevBtn">Prev</button>
+          <button id="debugNextBtn">Next</button>
+          <button id="debugExitBtn">Exit</button>
+        </div>
+      </div>
     </div>
 
     <!-- Error Screen -->

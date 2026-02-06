@@ -19,7 +19,7 @@ export const rayMarchFragmentShader = /* wgsl */ `
 struct Uniforms {
   resolution: vec2f,
   time: f32,
-  _pad: f32,
+  debugMode: u32,
 };
 @group(0) @binding(0) var<uniform> u: Uniforms;
 
@@ -162,6 +162,40 @@ fn acesToneMap(x: vec3f) -> vec3f {
   return a / b;
 }
 
+fn rayMarchDebug(ro: vec3f, rd: vec3f) -> vec3f {
+  var t: f32 = 0.0;
+  var matId: f32 = 0.0;
+  var steps: f32 = 0.0;
+  for (var i: i32 = 0; i < MAX_STEPS; i++) {
+    let p = ro + rd * t;
+    let hit = sceneSDF(p);
+    steps += 1.0;
+    if (hit.x < SURF_DIST) {
+      matId = hit.y;
+      break;
+    }
+    t += hit.x;
+    if (t > MAX_DIST) { break; }
+  }
+  return vec3f(t, matId, steps);
+}
+
+fn heatmap(t: f32) -> vec3f {
+  // Blue -> Cyan -> Green -> Yellow -> Red
+  let c = clamp(t, 0.0, 1.0);
+  if (c < 0.25) { return mix(vec3f(0.0, 0.0, 1.0), vec3f(0.0, 1.0, 1.0), c / 0.25); }
+  if (c < 0.5) { return mix(vec3f(0.0, 1.0, 1.0), vec3f(0.0, 1.0, 0.0), (c - 0.25) / 0.25); }
+  if (c < 0.75) { return mix(vec3f(0.0, 1.0, 0.0), vec3f(1.0, 1.0, 0.0), (c - 0.5) / 0.25); }
+  return mix(vec3f(1.0, 1.0, 0.0), vec3f(1.0, 0.0, 0.0), (c - 0.75) / 0.25);
+}
+
+fn matIdColor(matId: f32) -> vec3f {
+  if (matId < 1.5) { return vec3f(0.3, 0.3, 0.8); }  // floor - blue
+  if (matId < 2.5) { return vec3f(0.9, 0.2, 0.2); }  // spheres - red
+  if (matId < 3.5) { return vec3f(0.2, 0.9, 0.4); }  // torus - green
+  return vec3f(0.9, 0.8, 0.2);                        // pillars - yellow
+}
+
 @fragment
 fn fs_main(@builtin(position) fragCoord: vec4f) -> @location(0) vec4f {
   let uv = (fragCoord.xy - 0.5 * u.resolution) / u.resolution.y;
@@ -180,6 +214,78 @@ fn fs_main(@builtin(position) fragCoord: vec4f) -> @location(0) vec4f {
   let lightPos = vec3f(4.0*cos(t*0.5), 6.0, 4.0*sin(t*0.5));
   let lightCol = vec3f(1.0, 0.95, 0.8) * 2.0;
 
+  // Debug mode 1: SDF distance field grayscale
+  if (u.debugMode == 1u) {
+    let hit = rayMarch(ro, rd);
+    let d = hit.x;
+    if (d >= MAX_DIST) { return vec4f(0.0, 0.0, 0.0, 1.0); }
+    let p = ro + rd * d;
+    // Sample SDF at a grid of nearby points for visualization
+    let sdfVal = sceneSDF(p).x;
+    let viz = clamp(d / MAX_DIST, 0.0, 1.0);
+    let gray = 1.0 - viz;
+    return vec4f(vec3f(gray), 1.0);
+  }
+
+  // Debug mode 2: Ray march steps heatmap
+  if (u.debugMode == 2u) {
+    let dbg = rayMarchDebug(ro, rd);
+    let steps = dbg.z / f32(MAX_STEPS);
+    return vec4f(heatmap(steps), 1.0);
+  }
+
+  // Debug mode 3: Surface normals
+  if (u.debugMode == 3u) {
+    let hit = rayMarch(ro, rd);
+    if (hit.x >= MAX_DIST) { return vec4f(0.0, 0.0, 0.0, 1.0); }
+    let p = ro + rd * hit.x;
+    let n = calcNormal(p);
+    return vec4f(n * 0.5 + 0.5, 1.0);
+  }
+
+  // Debug mode 4: Material IDs flat color
+  if (u.debugMode == 4u) {
+    let hit = rayMarch(ro, rd);
+    if (hit.x >= MAX_DIST) { return vec4f(0.05, 0.05, 0.1, 1.0); }
+    return vec4f(matIdColor(hit.y), 1.0);
+  }
+
+  // Debug mode 5: Diffuse lighting only
+  if (u.debugMode == 5u) {
+    let hit = rayMarch(ro, rd);
+    if (hit.x >= MAX_DIST) { return vec4f(0.02, 0.02, 0.04, 1.0); }
+    let p = ro + rd * hit.x;
+    let n = calcNormal(p);
+    let baseCol = getMaterial(hit.y);
+    let ld = normalize(lightPos - p);
+    let diff = max(dot(n, ld), 0.0);
+    var col = diff * lightCol * baseCol;
+    col = pow(col, vec3f(1.0/2.2));
+    return vec4f(col, 1.0);
+  }
+
+  // Debug mode 6: Soft shadows only
+  if (u.debugMode == 6u) {
+    let hit = rayMarch(ro, rd);
+    if (hit.x >= MAX_DIST) { return vec4f(1.0, 1.0, 1.0, 1.0); }
+    let p = ro + rd * hit.x;
+    let n = calcNormal(p);
+    let ld = normalize(lightPos - p);
+    let shadow = softShadow(p + n * 0.01, ld, 0.02, length(lightPos - p));
+    return vec4f(vec3f(shadow), 1.0);
+  }
+
+  // Debug mode 7: Ambient occlusion only
+  if (u.debugMode == 7u) {
+    let hit = rayMarch(ro, rd);
+    if (hit.x >= MAX_DIST) { return vec4f(1.0, 1.0, 1.0, 1.0); }
+    let p = ro + rd * hit.x;
+    let n = calcNormal(p);
+    let ao = calcAO(p, n);
+    return vec4f(vec3f(ao), 1.0);
+  }
+
+  // Debug mode 0 (or default): Full render
   var col = vec3f(0.02, 0.02, 0.04); // sky
 
   let hit = rayMarch(ro, rd);
@@ -247,7 +353,7 @@ struct SimParams {
   deltaTime: f32,
   time: f32,
   numParticles: u32,
-  _pad: u32,
+  debugMode: u32,
   attractors: array<vec4f, 4>,
 };
 
@@ -281,13 +387,21 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   var p = particlesIn[idx];
   let dt = params.deltaTime;
 
+  // Debug mode 1: Initial distribution - no forces, keep initial state
+  if (params.debugMode == 1u) {
+    // Just pass through with a visible color
+    p.color = vec4f(0.3, 0.5, 1.0, 0.6);
+    particlesOut[idx] = p;
+    return;
+  }
+
   // Gravitational attractors
-  var force = vec3f(0.0);
+  var attractorForce = vec3f(0.0);
   for (var i: u32 = 0u; i < 4u; i++) {
     let attr = params.attractors[i];
     let diff = attr.xyz - p.pos;
     let dist = max(length(diff), 0.1);
-    force += normalize(diff) * attr.w / (dist * dist);
+    attractorForce += normalize(diff) * attr.w / (dist * dist);
   }
 
   // Turbulence noise
@@ -299,7 +413,15 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     noise3d(np + vec3f(31.0)) - 0.5
   ) * 4.0;
 
-  force += turbulence;
+  // Select force based on debug mode
+  var force = vec3f(0.0);
+  if (params.debugMode == 2u) {
+    force = attractorForce;  // Attractor only
+  } else if (params.debugMode == 3u) {
+    force = turbulence;      // Turbulence only
+  } else {
+    force = attractorForce + turbulence;  // Combined (modes 0, 4, 5)
+  }
 
   // Integrate
   p.vel += force * dt;
@@ -323,19 +445,32 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     p.life = 0.5 + hash(seed+6.0)*0.5;
   }
 
-  // Color based on velocity
-  let speed = length(p.vel);
-  let t = clamp(speed / 8.0, 0.0, 1.0);
-  // Blue -> Cyan -> Yellow -> Red
-  var col: vec3f;
-  if (t < 0.33) {
-    col = mix(vec3f(0.1, 0.2, 1.0), vec3f(0.0, 1.0, 1.0), t/0.33);
-  } else if (t < 0.66) {
-    col = mix(vec3f(0.0, 1.0, 1.0), vec3f(1.0, 1.0, 0.0), (t-0.33)/0.33);
+  // Color based on debug mode
+  if (params.debugMode == 5u) {
+    // Life cycle visualization: green (full life) -> yellow -> red (near death)
+    let lifeT = clamp(p.life, 0.0, 1.0);
+    var col: vec3f;
+    if (lifeT > 0.5) {
+      col = mix(vec3f(1.0, 1.0, 0.0), vec3f(0.0, 1.0, 0.0), (lifeT - 0.5) / 0.5);
+    } else {
+      col = mix(vec3f(1.0, 0.0, 0.0), vec3f(1.0, 1.0, 0.0), lifeT / 0.5);
+    }
+    p.color = vec4f(col, 0.6 * p.life);
   } else {
-    col = mix(vec3f(1.0, 1.0, 0.0), vec3f(1.0, 0.2, 0.0), (t-0.66)/0.34);
+    // Default: Color based on velocity
+    let speed = length(p.vel);
+    let t = clamp(speed / 8.0, 0.0, 1.0);
+    // Blue -> Cyan -> Yellow -> Red
+    var col: vec3f;
+    if (t < 0.33) {
+      col = mix(vec3f(0.1, 0.2, 1.0), vec3f(0.0, 1.0, 1.0), t/0.33);
+    } else if (t < 0.66) {
+      col = mix(vec3f(0.0, 1.0, 1.0), vec3f(1.0, 1.0, 0.0), (t-0.33)/0.33);
+    } else {
+      col = mix(vec3f(1.0, 1.0, 0.0), vec3f(1.0, 0.2, 0.0), (t-0.66)/0.34);
+    }
+    p.color = vec4f(col, 0.4 * p.life);
   }
-  p.color = vec4f(col, 0.4 * p.life);
 
   particlesOut[idx] = p;
 }
@@ -416,7 +551,7 @@ struct Uniforms {
   cameraPos: vec3f,
   time: f32,
   numInstances: u32,
-  _pad1: u32,
+  debugMode: u32,
   _pad2: u32,
   _pad3: u32,
 };
@@ -476,7 +611,7 @@ struct Uniforms {
   cameraPos: vec3f,
   time: f32,
   numInstances: u32,
-  _pad1: u32,
+  debugMode: u32,
   _pad2: u32,
   _pad3: u32,
 };
@@ -539,6 +674,67 @@ fn fs_main(
   let roughness: f32 = 0.4;
   let F0 = mix(vec3f(0.04), albedo, metallic);
 
+  // First light for debug modes
+  let light0 = lights.lights[0];
+  let L0 = normalize(light0.position - worldPos);
+  let H0 = normalize(V + L0);
+
+  // Debug mode 1: Flat Lambert shading (single light, no attenuation)
+  if (uniforms.debugMode == 1u) {
+    let diff = max(dot(N, L0), 0.0);
+    var col = albedo * diff;
+    col = pow(col, vec3f(1.0/2.2));
+    return vec4f(col, 1.0);
+  }
+
+  // Debug mode 2: GGX Normal Distribution visualization
+  if (uniforms.debugMode == 2u) {
+    let ndf = distributionGGX(N, H0, roughness);
+    let viz = clamp(ndf / 10.0, 0.0, 1.0);
+    return vec4f(vec3f(viz), 1.0);
+  }
+
+  // Debug mode 3: Fresnel effect visualization
+  if (uniforms.debugMode == 3u) {
+    let F = fresnelSchlick(max(dot(H0, V), 0.0), F0);
+    return vec4f(F, 1.0);
+  }
+
+  // Debug mode 4: Geometry function visualization
+  if (uniforms.debugMode == 4u) {
+    let G = geometrySmith(N, V, L0, roughness);
+    return vec4f(vec3f(G), 1.0);
+  }
+
+  // Debug mode 5: Single light full PBR
+  if (uniforms.debugMode == 5u) {
+    let distance0 = length(light0.position - worldPos);
+    let attenuation0 = 1.0 / (distance0 * distance0 + 1.0);
+    let radiance0 = light0.color * light0.intensity * attenuation0;
+
+    let NDF = distributionGGX(N, H0, roughness);
+    let G = geometrySmith(N, V, L0, roughness);
+    let F = fresnelSchlick(max(dot(H0, V), 0.0), F0);
+
+    let numerator = NDF * G * F;
+    let denominator = 4.0 * max(dot(N, V), 0.0) * max(dot(N, L0), 0.0) + 0.0001;
+    let specular = numerator / denominator;
+
+    let kS = F;
+    let kD = (vec3f(1.0) - kS) * (1.0 - metallic);
+    let NdotL = max(dot(N, L0), 0.0);
+
+    var color = vec3f(0.03) * albedo + (kD * albedo / PI + specular) * radiance0 * NdotL;
+
+    // ACES tone mapping
+    let a = color * (color * 2.51 + vec3f(0.03));
+    let b = color * (color * 2.43 + vec3f(0.59)) + vec3f(0.14);
+    color = a / b;
+    color = pow(color, vec3f(1.0/2.2));
+    return vec4f(color, 1.0);
+  }
+
+  // Full lighting loop (modes 0 and 6)
   var Lo = vec3f(0.0);
 
   // 12 dynamic point lights
@@ -568,6 +764,13 @@ fn fs_main(
   let ambient = vec3f(0.03) * albedo;
   var color = ambient + Lo;
 
+  // Debug mode 6: Multi-light, no tone mapping (clamp output)
+  if (uniforms.debugMode == 6u) {
+    color = clamp(color, vec3f(0.0), vec3f(1.0));
+    return vec4f(color, 1.0);
+  }
+
+  // Default (mode 0): Full render with ACES tone mapping + gamma
   // ACES tone mapping
   let a = color * (color * 2.51 + vec3f(0.03));
   let b = color * (color * 2.43 + vec3f(0.59)) + vec3f(0.14);
