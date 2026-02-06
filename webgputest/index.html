@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WebGPU GPU Benchmark</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <canvas id="gpuCanvas"></canvas>
+    <canvas id="graphCanvas" width="280" height="60"></canvas>
+
+    <!-- Performance Overlay -->
+    <div id="overlay">
+      <div class="overlay-row header-row">
+        <span id="gpuName">Detecting GPU...</span>
+        <span id="resolution"></span>
+      </div>
+      <div class="overlay-row stats-row">
+        <div class="stat-block">
+          <div class="stat-label">FPS</div>
+          <div class="stat-value" id="fps">--</div>
+        </div>
+        <div class="stat-block">
+          <div class="stat-label">Frame Time</div>
+          <div class="stat-value" id="frameTime">-- ms</div>
+        </div>
+      </div>
+      <div class="overlay-row minmax-row">
+        <span>Min <b id="fpsMin">--</b></span>
+        <span>Max <b id="fpsMax">--</b></span>
+        <span>Avg <b id="fpsAvg">--</b></span>
+      </div>
+      <div class="overlay-row stats-row">
+        <div class="stat-block">
+          <div class="stat-label">GPU Time</div>
+          <div class="stat-value" id="gpuTime">N/A</div>
+        </div>
+        <div class="stat-block">
+          <div class="stat-label">Primitives</div>
+          <div class="stat-value" id="primitives">--</div>
+        </div>
+      </div>
+      <div class="overlay-row graph-row">
+        <!-- graphCanvas is repositioned here via CSS -->
+      </div>
+      <div class="overlay-row progress-row">
+        <div class="progress-header">
+          <span id="sceneName">Ready</span>
+          <span id="scenePercent"></span>
+        </div>
+        <div class="progress-bar-bg">
+          <div class="progress-bar-fill" id="progressBar"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Start Screen -->
+    <div id="startScreen">
+      <h1>WebGPU Benchmark</h1>
+      <p>3 stress test scenes &bull; 60 seconds total</p>
+      <button id="startBtn">Start Benchmark</button>
+    </div>
+
+    <!-- Error Screen -->
+    <div id="errorScreen" class="hidden">
+      <h2>WebGPU Not Available</h2>
+      <p id="errorMsg">
+        Your browser does not support WebGPU. Please use Chrome 113+ or Edge
+        113+.
+      </p>
+    </div>
+
+    <!-- Score Screen -->
+    <div id="scoreScreen" class="hidden">
+      <div class="score-card">
+        <h1>Benchmark Complete</h1>
+        <div class="final-score" id="finalScore">0</div>
+        <div class="score-label">SCORE</div>
+        <div class="scene-scores">
+          <div class="scene-score-item">
+            <span>Scene 1: Ray March</span>
+            <span id="score1">--</span>
+          </div>
+          <div class="scene-score-item">
+            <span>Scene 2: Particle Compute</span>
+            <span id="score2">--</span>
+          </div>
+          <div class="scene-score-item">
+            <span>Scene 3: Geometry Stress</span>
+            <span id="score3">--</span>
+          </div>
+        </div>
+        <button id="restartBtn">Run Again</button>
+      </div>
+    </div>
+
+    <script type="module" src="main.js"></script>
+  </body>
+</html>
