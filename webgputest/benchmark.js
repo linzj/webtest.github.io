@@ -280,7 +280,7 @@ export class GPUTimestampHelper {
   }
 
   resolve(encoder) {
-    if (!this.available) return;
+    if (!this.available || this.pendingRead) return;
     encoder.resolveQuerySet(this.querySet, 0, 2, this.resolveBuffer, 0);
     encoder.copyBufferToBuffer(this.resolveBuffer, 0, this.resultBuffer, 0, 16);
   }
