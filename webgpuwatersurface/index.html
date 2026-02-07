@@ -1,0 +1,1315 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WebGPU Water Ripple Simulation</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #000;
+      }
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+      #info {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        color: #fff;
+        font-family: monospace;
+        font-size: 13px;
+        background: rgba(0, 0, 0, 0.5);
+        padding: 6px 10px;
+        border-radius: 4px;
+        pointer-events: none;
+      }
+      #error {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        color: #f44;
+        font-family: sans-serif;
+        font-size: 18px;
+        text-align: center;
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="canvas"></canvas>
+    <div id="info">
+      Click water to create ripples | Drag to orbit | Scroll to zoom
+    </div>
+    <div id="error"></div>
+    <script>
+      "use strict";
+
+      const GRID = 512;
+      const POOL_W = 20.0;
+      const POOL_D = 20.0;
+      const POOL_H = 3.0;
+      const WATER_Y = 0.0;
+      const SPHERE_POS = [-3.0, 0.5, 0.0];
+      const SPHERE_RADIUS = 1.2;
+
+      async function main() {
+        const canvas = document.getElementById("canvas");
+        const errorDiv = document.getElementById("error");
+
+        if (!navigator.gpu) {
+          errorDiv.style.display = "block";
+          errorDiv.textContent =
+            "WebGPU is not supported in this browser. Please use Chrome or Edge.";
+          return;
+        }
+
+        const adapter = await navigator.gpu.requestAdapter({
+          powerPreference: "high-performance",
+        });
+        if (!adapter) {
+          errorDiv.style.display = "block";
+          errorDiv.textContent = "Failed to get GPU adapter.";
+          return;
+        }
+        const device = await adapter.requestDevice();
+
+        const ctx = canvas.getContext("webgpu");
+        const format = navigator.gpu.getPreferredCanvasFormat();
+
+        function resize() {
+          const dpr = window.devicePixelRatio || 1;
+          canvas.width = Math.floor(canvas.clientWidth * dpr);
+          canvas.height = Math.floor(canvas.clientHeight * dpr);
+          ctx.configure({ device, format, alphaMode: "opaque" });
+        }
+        resize();
+        window.addEventListener("resize", resize);
+
+        // ========== DEPTH TEXTURE ==========
+        let depthTex = null;
+        function ensureDepthTexture() {
+          if (
+            depthTex &&
+            depthTex.width === canvas.width &&
+            depthTex.height === canvas.height
+          )
+            return;
+          if (depthTex) depthTex.destroy();
+          depthTex = device.createTexture({
+            size: [canvas.width, canvas.height],
+            format: "depth24plus",
+            usage: GPUTextureUsage.RENDER_ATTACHMENT,
+            sampleCount: 4,
+          });
+        }
+
+        // ========== MSAA TEXTURE ==========
+        let msaaTex = null;
+        function ensureMSAATexture() {
+          if (
+            msaaTex &&
+            msaaTex.width === canvas.width &&
+            msaaTex.height === canvas.height
+          )
+            return;
+          if (msaaTex) msaaTex.destroy();
+          msaaTex = device.createTexture({
+            size: [canvas.width, canvas.height],
+            format,
+            usage: GPUTextureUsage.RENDER_ATTACHMENT,
+            sampleCount: 4,
+          });
+        }
+
+        // ========== CAMERA ==========
+        let camTheta = 0.8;
+        let camPhi = 0.65;
+        let camDist = 25.0;
+        let camTarget = [0, -0.5, 0];
+        let autoOrbit = true;
+        let isDragging = false;
+        let lastMouse = [0, 0];
+
+        canvas.addEventListener("pointerdown", (e) => {
+          isDragging = true;
+          lastMouse = [e.clientX, e.clientY];
+          autoOrbit = false;
+        });
+        window.addEventListener("pointermove", (e) => {
+          if (!isDragging) return;
+          const dx = e.clientX - lastMouse[0];
+          const dy = e.clientY - lastMouse[1];
+          lastMouse = [e.clientX, e.clientY];
+          camTheta -= dx * 0.005;
+          camPhi = Math.max(0.1, Math.min(Math.PI * 0.48, camPhi - dy * 0.005));
+        });
+        window.addEventListener("pointerup", () => {
+          isDragging = false;
+        });
+        canvas.addEventListener(
+          "wheel",
+          (e) => {
+            e.preventDefault();
+            camDist = Math.max(8, Math.min(50, camDist + e.deltaY * 0.02));
+          },
+          { passive: false },
+        );
+
+        // ========== CLICK RIPPLE ==========
+        let pendingDrops = [];
+        canvas.addEventListener("click", (e) => {
+          if (isDragging) return;
+          const rect = canvas.getBoundingClientRect();
+          const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+          const ny = 1 - ((e.clientY - rect.top) / rect.height) * 2;
+          // Unproject to water plane y=0
+          const invVP = mat4Invert(mat4Mul(projMat, viewMat));
+          if (!invVP) return;
+          const near = transformPoint(invVP, [nx, ny, 0]);
+          const far = transformPoint(invVP, [nx, ny, 1]);
+          const dir = vecSub(far, near);
+          if (Math.abs(dir[1]) < 0.001) return;
+          const t = (WATER_Y - near[1]) / dir[1];
+          if (t < 0) return;
+          const hitX = near[0] + dir[0] * t;
+          const hitZ = near[2] + dir[2] * t;
+          // Convert to grid coords
+          const gx = (hitX / (POOL_W * 0.5) + 1) * 0.5;
+          const gz = (hitZ / (POOL_D * 0.5) + 1) * 0.5;
+          if (gx >= 0 && gx <= 1 && gz >= 0 && gz <= 1) {
+            pendingDrops.push({ x: gx, y: gz, radius: 0.02, strength: 2.5 });
+          }
+        });
+
+        // ========== MATH HELPERS ==========
+        function mat4Perspective(fov, aspect, near, far) {
+          const f = 1.0 / Math.tan(fov / 2);
+          const nf = 1 / (near - far);
+          return new Float32Array([
+            f / aspect,
+            0,
+            0,
+            0,
+            0,
+            f,
+            0,
+            0,
+            0,
+            0,
+            (far + near) * nf,
+            -1,
+            0,
+            0,
+            2 * far * near * nf,
+            0,
+          ]);
+        }
+        function mat4LookAt(eye, center, up) {
+          const z = vecNorm(vecSub(eye, center));
+          const x = vecNorm(vecCross(up, z));
+          const y = vecCross(z, x);
+          return new Float32Array([
+            x[0],
+            y[0],
+            z[0],
+            0,
+            x[1],
+            y[1],
+            z[1],
+            0,
+            x[2],
+            y[2],
+            z[2],
+            0,
+            -vecDot(x, eye),
+            -vecDot(y, eye),
+            -vecDot(z, eye),
+            1,
+          ]);
+        }
+        function mat4Mul(a, b) {
+          const o = new Float32Array(16);
+          for (let i = 0; i < 4; i++)
+            for (let j = 0; j < 4; j++) {
+              let s = 0;
+              for (let k = 0; k < 4; k++) s += a[k * 4 + j] * b[i * 4 + k];
+              o[i * 4 + j] = s;
+            }
+          return o;
+        }
+        function mat4Invert(m) {
+          const inv = new Float32Array(16);
+          inv[0] =
+            m[5] * m[10] * m[15] -
+            m[5] * m[11] * m[14] -
+            m[9] * m[6] * m[15] +
+            m[9] * m[7] * m[14] +
+            m[13] * m[6] * m[11] -
+            m[13] * m[7] * m[10];
+          inv[4] =
+            -m[4] * m[10] * m[15] +
+            m[4] * m[11] * m[14] +
+            m[8] * m[6] * m[15] -
+            m[8] * m[7] * m[14] -
+            m[12] * m[6] * m[11] +
+            m[12] * m[7] * m[10];
+          inv[8] =
+            m[4] * m[9] * m[15] -
+            m[4] * m[11] * m[13] -
+            m[8] * m[5] * m[15] +
+            m[8] * m[7] * m[13] +
+            m[12] * m[5] * m[11] -
+            m[12] * m[7] * m[9];
+          inv[12] =
+            -m[4] * m[9] * m[14] +
+            m[4] * m[10] * m[13] +
+            m[8] * m[5] * m[14] -
+            m[8] * m[6] * m[13] -
+            m[12] * m[5] * m[10] +
+            m[12] * m[6] * m[9];
+          inv[1] =
+            -m[1] * m[10] * m[15] +
+            m[1] * m[11] * m[14] +
+            m[9] * m[2] * m[15] -
+            m[9] * m[3] * m[14] -
+            m[13] * m[2] * m[11] +
+            m[13] * m[3] * m[10];
+          inv[5] =
+            m[0] * m[10] * m[15] -
+            m[0] * m[11] * m[14] -
+            m[8] * m[2] * m[15] +
+            m[8] * m[3] * m[14] +
+            m[12] * m[2] * m[11] -
+            m[12] * m[3] * m[10];
+          inv[9] =
+            -m[0] * m[9] * m[15] +
+            m[0] * m[11] * m[13] +
+            m[8] * m[1] * m[15] -
+            m[8] * m[3] * m[13] -
+            m[12] * m[1] * m[11] +
+            m[12] * m[3] * m[9];
+          inv[13] =
+            m[0] * m[9] * m[14] -
+            m[0] * m[10] * m[13] -
+            m[8] * m[1] * m[14] +
+            m[8] * m[2] * m[13] +
+            m[12] * m[1] * m[10] -
+            m[12] * m[2] * m[9];
+          inv[2] =
+            m[1] * m[6] * m[15] -
+            m[1] * m[7] * m[14] -
+            m[5] * m[2] * m[15] +
+            m[5] * m[3] * m[14] +
+            m[13] * m[2] * m[7] -
+            m[13] * m[3] * m[6];
+          inv[6] =
+            -m[0] * m[6] * m[15] +
+            m[0] * m[7] * m[14] +
+            m[4] * m[2] * m[15] -
+            m[4] * m[3] * m[14] -
+            m[12] * m[2] * m[7] +
+            m[12] * m[3] * m[6];
+          inv[10] =
+            m[0] * m[5] * m[15] -
+            m[0] * m[7] * m[13] -
+            m[4] * m[1] * m[15] +
+            m[4] * m[3] * m[13] +
+            m[12] * m[1] * m[7] -
+            m[12] * m[3] * m[5];
+          inv[14] =
+            -m[0] * m[5] * m[14] +
+            m[0] * m[6] * m[13] +
+            m[4] * m[1] * m[14] -
+            m[4] * m[2] * m[13] -
+            m[12] * m[1] * m[6] +
+            m[12] * m[2] * m[5];
+          inv[3] =
+            -m[1] * m[6] * m[11] +
+            m[1] * m[7] * m[10] +
+            m[5] * m[2] * m[11] -
+            m[5] * m[3] * m[10] -
+            m[9] * m[2] * m[7] +
+            m[9] * m[3] * m[6];
+          inv[7] =
+            m[0] * m[6] * m[11] -
+            m[0] * m[7] * m[10] -
+            m[4] * m[2] * m[11] +
+            m[4] * m[3] * m[10] +
+            m[8] * m[2] * m[7] -
+            m[8] * m[3] * m[6];
+          inv[11] =
+            -m[0] * m[5] * m[11] +
+            m[0] * m[7] * m[9] +
+            m[4] * m[1] * m[11] -
+            m[4] * m[3] * m[9] -
+            m[8] * m[1] * m[7] +
+            m[8] * m[3] * m[5];
+          inv[15] =
+            m[0] * m[5] * m[10] -
+            m[0] * m[6] * m[9] -
+            m[4] * m[1] * m[10] +
+            m[4] * m[2] * m[9] +
+            m[8] * m[1] * m[6] -
+            m[8] * m[2] * m[5];
+          let det =
+            m[0] * inv[0] + m[1] * inv[4] + m[2] * inv[8] + m[3] * inv[12];
+          if (Math.abs(det) < 1e-10) return null;
+          det = 1.0 / det;
+          for (let i = 0; i < 16; i++) inv[i] *= det;
+          return inv;
+        }
+        function transformPoint(m, p) {
+          const w = m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15];
+          return [
+            (m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12]) / w,
+            (m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13]) / w,
+            (m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + m[14]) / w,
+          ];
+        }
+        function vecSub(a, b) {
+          return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+        }
+        function vecDot(a, b) {
+          return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        }
+        function vecCross(a, b) {
+          return [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+          ];
+        }
+        function vecNorm(v) {
+          const l = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]) || 1;
+          return [v[0] / l, v[1] / l, v[2] / l];
+        }
+
+        let viewMat = new Float32Array(16);
+        let projMat = new Float32Array(16);
+
+        // ========== BUFFERS ==========
+        const gridCells = GRID * GRID;
+        const heightBufA = device.createBuffer({
+          size: gridCells * 4,
+          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        });
+        const heightBufB = device.createBuffer({
+          size: gridCells * 4,
+          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        });
+
+        // Params: time, dt, damping, c2, dropX, dropY, dropRadius, dropStrength
+        const paramsBuffer = device.createBuffer({
+          size: 48,
+          usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        });
+
+        // Camera: viewMat(64) + projMat(64) + eye(16) + invViewProj(64) = 208, pad to 224
+        const cameraBuffer = device.createBuffer({
+          size: 224,
+          usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        });
+
+        // Light: dir(16) + color(16) + ambient(16) = 48
+        const lightBuffer = device.createBuffer({
+          size: 48,
+          usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        });
+
+        // ========== COMPUTE PIPELINE: WAVE SIMULATION ==========
+        const computeShader = device.createShaderModule({
+          code: `
+    struct Params {
+      time: f32,
+      dt: f32,
+      damping: f32,
+      c2: f32,
+      dropX: f32,
+      dropY: f32,
+      dropRadius: f32,
+      dropStrength: f32,
+      sphereX: f32,
+      sphereZ: f32,
+      sphereR: f32,
+      sphereWaveStr: f32,
+    };
+    @group(0) @binding(0) var<storage, read> current: array<f32>;
+    @group(0) @binding(1) var<storage, read> previous: array<f32>;
+    @group(0) @binding(2) var<storage, read_write> next: array<f32>;
+    @group(0) @binding(3) var<uniform> params: Params;
+
+    const GRID: u32 = ${GRID}u;
+
+    fn idx(x: u32, y: u32) -> u32 {
+      return y * GRID + x;
+    }
+
+    fn inSphere(cx: u32, cy: u32) -> bool {
+      let u = f32(cx) / f32(GRID);
+      let v = f32(cy) / f32(GRID);
+      let dx = u - params.sphereX;
+      let dy = v - params.sphereZ;
+      return (dx * dx + dy * dy) < (params.sphereR * params.sphereR);
+    }
+
+    fn getNeighbor(nx: u32, ny: u32, cx: u32, cy: u32) -> f32 {
+      if (inSphere(nx, ny)) {
+        return current[idx(cx, cy)];
+      }
+      return current[idx(nx, ny)];
+    }
+
+    @compute @workgroup_size(8, 8)
+    fn main(@builtin(global_invocation_id) id: vec3u) {
+      if (id.x >= GRID || id.y >= GRID) { return; }
+
+      let x = id.x;
+      let y = id.y;
+      let i = idx(x, y);
+
+      if (inSphere(x, y)) {
+        next[i] = 0.0;
+        return;
+      }
+
+      let xm = select(x - 1u, 1u, x == 0u);
+      let xp = select(x + 1u, GRID - 2u, x == GRID - 1u);
+      let ym = select(y - 1u, 1u, y == 0u);
+      let yp = select(y + 1u, GRID - 2u, y == GRID - 1u);
+
+      let h = current[i];
+      let hp = previous[i];
+
+      let nL = getNeighbor(xm, y, x, y);
+      let nR = getNeighbor(xp, y, x, y);
+      let nD = getNeighbor(x, ym, x, y);
+      let nU = getNeighbor(x, yp, x, y);
+      let laplacian = nL + nR + nD + nU - 4.0 * h;
+
+      var h_new = 2.0 * h - hp + params.c2 * laplacian;
+      h_new *= params.damping;
+
+      if (params.dropStrength > 0.0) {
+        let u = f32(x) / f32(GRID);
+        let v = f32(y) / f32(GRID);
+        let ddx = u - params.dropX;
+        let ddy = v - params.dropY;
+        let dist = sqrt(ddx * ddx + ddy * ddy);
+        if (dist < params.dropRadius) {
+          let falloff = exp(-dist * dist / (params.dropRadius * params.dropRadius * 0.25));
+          h_new += params.dropStrength * falloff;
+        }
+      }
+
+      next[i] = h_new;
+    }
+  `,
+        });
+
+        const computeBGL = device.createBindGroupLayout({
+          entries: [
+            {
+              binding: 0,
+              visibility: GPUShaderStage.COMPUTE,
+              buffer: { type: "read-only-storage" },
+            },
+            {
+              binding: 1,
+              visibility: GPUShaderStage.COMPUTE,
+              buffer: { type: "read-only-storage" },
+            },
+            {
+              binding: 2,
+              visibility: GPUShaderStage.COMPUTE,
+              buffer: { type: "storage" },
+            },
+            {
+              binding: 3,
+              visibility: GPUShaderStage.COMPUTE,
+              buffer: { type: "uniform" },
+            },
+          ],
+        });
+
+        const computePipeline = device.createComputePipeline({
+          layout: device.createPipelineLayout({
+            bindGroupLayouts: [computeBGL],
+          }),
+          compute: { module: computeShader, entryPoint: "main" },
+        });
+
+        const heightBufC = device.createBuffer({
+          size: gridCells * 4,
+          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        });
+
+        let bufState = 0;
+        const bufs = [heightBufA, heightBufB, heightBufC];
+
+        function getComputeBindGroup() {
+          const cur = bufs[bufState % 3];
+          const prev = bufs[(bufState + 2) % 3];
+          const nxt = bufs[(bufState + 1) % 3];
+          return device.createBindGroup({
+            layout: computeBGL,
+            entries: [
+              { binding: 0, resource: { buffer: cur } },
+              { binding: 1, resource: { buffer: prev } },
+              { binding: 2, resource: { buffer: nxt } },
+              { binding: 3, resource: { buffer: paramsBuffer } },
+            ],
+          });
+        }
+
+        // ========== RAY MARCH RENDER PIPELINE ==========
+        const rayMarchShader = device.createShaderModule({
+          code: `
+    struct Camera {
+      view: mat4x4f,
+      proj: mat4x4f,
+      eye: vec4f,
+      invViewProj: mat4x4f,
+    };
+    struct Light {
+      dir: vec4f,
+      color: vec4f,
+      ambient: vec4f,
+    };
+
+    @group(0) @binding(0) var<uniform> camera: Camera;
+    @group(0) @binding(1) var<uniform> light: Light;
+    @group(0) @binding(2) var<storage, read> heights: array<f32>;
+
+    const GRID: u32 = ${GRID}u;
+    const POOL_W: f32 = ${POOL_W};
+    const POOL_D: f32 = ${POOL_D};
+    const POOL_H: f32 = ${POOL_H};
+    const HW: f32 = POOL_W * 0.5;
+    const HD: f32 = POOL_D * 0.5;
+    const RIM_W: f32 = 1.5;
+    const RIM_TOP: f32 = 0.9;
+    const RIM_BOT: f32 = 0.5;
+    const OW: f32 = HW + RIM_W;
+    const OD: f32 = HD + RIM_W;
+    const SPHERE_CENTER: vec3f = vec3f(${SPHERE_POS[0]}, ${SPHERE_POS[1]}, ${SPHERE_POS[2]});
+    const SPHERE_R: f32 = ${SPHERE_RADIUS};
+    const WATER_IOR: f32 = 1.33;
+    const BG_COLOR: vec3f = vec3f(0.18, 0.22, 0.25);
+
+    struct VOut {
+      @builtin(position) pos: vec4f,
+      @location(0) uv: vec2f,
+    };
+
+    @vertex fn vs(@builtin(vertex_index) vi: u32) -> VOut {
+      let uv = vec2f(f32((vi << 1u) & 2u), f32(vi & 2u));
+      var out: VOut;
+      out.pos = vec4f(uv * 2.0 - 1.0, 0.0, 1.0);
+      out.uv = uv;
+      return out;
+    }
+
+    // ---- Heightfield sampling ----
+    fn sampleH(u: f32, v: f32) -> f32 {
+      let uc = clamp(u, 0.0, 1.0);
+      let vc = clamp(v, 0.0, 1.0);
+      let fx = uc * f32(GRID - 1u);
+      let fy = vc * f32(GRID - 1u);
+      let ix = u32(fx);
+      let iy = u32(fy);
+      let fx2 = fx - f32(ix);
+      let fy2 = fy - f32(iy);
+      let ix1 = min(ix + 1u, GRID - 1u);
+      let iy1 = min(iy + 1u, GRID - 1u);
+      let h00 = heights[iy * GRID + ix];
+      let h10 = heights[iy * GRID + ix1];
+      let h01 = heights[iy1 * GRID + ix];
+      let h11 = heights[iy1 * GRID + ix1];
+      return mix(mix(h00, h10, fx2), mix(h01, h11, fx2), fy2);
+    }
+
+    fn worldToUV(p: vec3f) -> vec2f {
+      return vec2f(p.x / POOL_W + 0.5, p.z / POOL_D + 0.5);
+    }
+
+    fn waterHeightAt(p: vec3f) -> f32 {
+      let uv = worldToUV(p);
+      return sampleH(uv.x, uv.y);
+    }
+
+    fn waterNormalAt(p: vec3f) -> vec3f {
+      let eps = POOL_W / f32(GRID);
+      let hL = waterHeightAt(p - vec3f(eps, 0.0, 0.0));
+      let hR = waterHeightAt(p + vec3f(eps, 0.0, 0.0));
+      let hD = waterHeightAt(p - vec3f(0.0, 0.0, eps));
+      let hU = waterHeightAt(p + vec3f(0.0, 0.0, eps));
+      return normalize(vec3f(hL - hR, eps * 2.0, hD - hU));
+    }
+
+    // ---- Ray-AABB intersection ----
+    fn rayAABB(ro: vec3f, invRd: vec3f, bmin: vec3f, bmax: vec3f) -> vec2f {
+      let t1 = (bmin - ro) * invRd;
+      let t2 = (bmax - ro) * invRd;
+      let tmin = min(t1, t2);
+      let tmax = max(t1, t2);
+      let tN = max(max(tmin.x, tmin.y), tmin.z);
+      let tF = min(min(tmax.x, tmax.y), tmax.z);
+      return vec2f(tN, tF);
+    }
+
+    // ---- Ray-sphere intersection ----
+    fn raySphere(ro: vec3f, rd: vec3f, center: vec3f, radius: f32) -> vec2f {
+      let oc = ro - center;
+      let b = dot(oc, rd);
+      let c = dot(oc, oc) - radius * radius;
+      let disc = b * b - c;
+      if (disc < 0.0) { return vec2f(-1.0, -1.0); }
+      let sq = sqrt(disc);
+      return vec2f(-b - sq, -b + sq);
+    }
+
+    // ---- Pool AABB normal ----
+    fn poolAABBNormal(p: vec3f, bmin: vec3f, bmax: vec3f) -> vec3f {
+      let eps = 0.01;
+      if (abs(p.y - bmax.y) < eps) { return vec3f(0.0, 1.0, 0.0); }
+      if (abs(p.y - bmin.y) < eps) { return vec3f(0.0, 1.0, 0.0); }
+      if (abs(p.x - bmin.x) < eps) { return vec3f(1.0, 0.0, 0.0); }
+      if (abs(p.x - bmax.x) < eps) { return vec3f(-1.0, 0.0, 0.0); }
+      if (abs(p.z - bmin.z) < eps) { return vec3f(0.0, 0.0, 1.0); }
+      if (abs(p.z - bmax.z) < eps) { return vec3f(0.0, 0.0, -1.0); }
+      return vec3f(0.0, 1.0, 0.0);
+    }
+
+    // ---- Fresnel (Schlick) ----
+    fn schlick(cosTheta: f32, ior: f32) -> f32 {
+      var r0 = (1.0 - ior) / (1.0 + ior);
+      r0 = r0 * r0;
+      return r0 + (1.0 - r0) * pow(1.0 - cosTheta, 5.0);
+    }
+
+    // ---- Sky color (brighter for GI) ----
+    fn skyColor(rd: vec3f) -> vec3f {
+      let t = clamp(rd.y * 0.5 + 0.5, 0.0, 1.0);
+      // Horizon warm, zenith blue, ground dark
+      let horizon = vec3f(0.7, 0.75, 0.82);
+      let zenith = vec3f(0.4, 0.6, 0.9);
+      let ground = vec3f(0.25, 0.3, 0.28);
+      if (rd.y < 0.0) {
+        return mix(horizon, ground, clamp(-rd.y * 2.0, 0.0, 1.0));
+      }
+      return mix(horizon, zenith, t);
+    }
+
+    // ---- Sphere shadow (from pool floor toward light) ----
+    fn sphereShadow(worldPos: vec3f, lightDir: vec3f) -> f32 {
+      let oc = worldPos - SPHERE_CENTER;
+      let b = dot(oc, lightDir);
+      if (b >= 0.0) { return 1.0; }
+      let rayDistSq = dot(oc, oc) - b * b;
+      let minDist = sqrt(max(rayDistSq, 0.0)) - SPHERE_R;
+      if (minDist < 0.0) { return 0.25; }
+      if (minDist < 0.6) {
+        return mix(0.25, 1.0, smoothstep(0.0, 0.6, minDist));
+      }
+      return 1.0;
+    }
+
+    // ---- Caustics from heightfield curvature ----
+    fn caustics(worldPos: vec3f) -> vec3f {
+      let uv = worldToUV(worldPos);
+      if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+        return vec3f(0.0);
+      }
+      let eps = 1.0 / f32(GRID);
+      let chromOff = eps * 1.5;
+
+      let hCr = sampleH(uv.x + chromOff, uv.y);
+      let hLr = sampleH(uv.x + chromOff - eps, uv.y);
+      let hRr = sampleH(uv.x + chromOff + eps, uv.y);
+      let hDr = sampleH(uv.x + chromOff, uv.y - eps);
+      let hUr = sampleH(uv.x + chromOff, uv.y + eps);
+      let lapR = hLr + hRr + hDr + hUr - 4.0 * hCr;
+
+      let hCg = sampleH(uv.x, uv.y);
+      let hLg = sampleH(uv.x - eps, uv.y);
+      let hRg = sampleH(uv.x + eps, uv.y);
+      let hDg = sampleH(uv.x, uv.y - eps);
+      let hUg = sampleH(uv.x, uv.y + eps);
+      let lapG = hLg + hRg + hDg + hUg - 4.0 * hCg;
+
+      let hCb = sampleH(uv.x - chromOff, uv.y + chromOff);
+      let hLb = sampleH(uv.x - chromOff - eps, uv.y + chromOff);
+      let hRb = sampleH(uv.x - chromOff + eps, uv.y + chromOff);
+      let hDb = sampleH(uv.x - chromOff, uv.y + chromOff - eps);
+      let hUb = sampleH(uv.x - chromOff, uv.y + chromOff + eps);
+      let lapB = hLb + hRb + hDb + hUb - 4.0 * hCb;
+
+      let k = 35.0;
+      let cR = 1.0 / max(1.0 - lapR * k, 0.05) - 1.0;
+      let cG = 1.0 / max(1.0 - lapG * k, 0.05) - 1.0;
+      let cB = 1.0 / max(1.0 - lapB * k, 0.05) - 1.0;
+
+      let depthAtten = clamp(1.0 - (-worldPos.y) / 4.0, 0.3, 1.0);
+      return max(vec3f(cR, cG, cB), vec3f(0.0)) * depthAtten * 0.015;
+    }
+
+    // ---- Shade pool surface (walls, floor, rim) with GI ----
+    fn shadePool(p: vec3f, N: vec3f, isRim: bool) -> vec3f {
+      let L = normalize(light.dir.xyz);
+      let NdotL = dot(N, L) * 0.4 + 0.6;
+      let teal = select(vec3f(0.35, 0.68, 0.56), vec3f(0.45, 0.80, 0.68), isRim);
+      let shadow = sphereShadow(p, L);
+
+      // Sky hemisphere light (GI approximation)
+      let skyUp = vec3f(0.45, 0.55, 0.65); // sky illumination from above
+      let groundBounce = vec3f(0.18, 0.30, 0.25); // ground bounce from below
+      let hemiT = N.y * 0.5 + 0.5;
+      let hemiLight = mix(groundBounce, skyUp, hemiT);
+
+      // Fill light from opposite side
+      let fillDir = normalize(vec3f(-0.3, 0.5, -0.6));
+      let fillNdotL = max(dot(N, fillDir), 0.0) * 0.35;
+      let fillColor = vec3f(0.3, 0.35, 0.4);
+
+      let caust = select(caustics(p), vec3f(0.0), isRim || p.y > 0.3);
+      var color = teal * (hemiLight + light.color.xyz * NdotL * shadow + fillColor * fillNdotL) + caust * shadow;
+
+      // Subtle depth fog (only underwater)
+      let depth = clamp((-p.y) / 3.0, 0.0, 1.0);
+      let fogColor = vec3f(0.22, 0.52, 0.44);
+      color = mix(color, fogColor, depth * 0.06);
+      return color;
+    }
+
+    // ---- Shade sphere with GI ----
+    fn shadeSphere(p: vec3f, N: vec3f) -> vec3f {
+      let V = normalize(camera.eye.xyz - p);
+      let L = normalize(light.dir.xyz);
+      let NdotL = dot(N, L) * 0.5 + 0.5;
+      let H = normalize(V + L);
+      let spec = pow(max(dot(N, H), 0.0), 64.0) * 1.2;
+
+      // Fill light
+      let L2 = normalize(vec3f(-0.3, 0.6, -0.5));
+      let NdotL2 = max(dot(N, L2), 0.0) * 0.4;
+
+      let baseColor = vec3f(0.92, 0.92, 0.9);
+
+      // Sky hemisphere GI
+      let skyUp = vec3f(0.5, 0.58, 0.68);
+      let groundBounce = vec3f(0.15, 0.25, 0.22);
+      let hemiT = N.y * 0.5 + 0.5;
+      let hemiLight = mix(groundBounce, skyUp, hemiT) * 0.6;
+
+      let diffuse = baseColor * (hemiLight + light.color.xyz * (NdotL + NdotL2));
+      let F = 0.04 + 0.96 * pow(1.0 - max(dot(N, V), 0.0), 5.0);
+      let reflDir = reflect(-V, N);
+      let skyRefl = skyColor(reflDir);
+      var color = diffuse + spec + skyRefl * F * 0.3;
+
+      // Subtle underwater tint
+      if (p.y < 0.0) {
+        let underwaterT = clamp(-p.y * 0.2, 0.0, 0.12);
+        color = mix(color, vec3f(0.3, 0.6, 0.55), underwaterT);
+      }
+      return color;
+    }
+
+    // ---- Trace refracted ray underwater ----
+    fn traceUnderwater(ro: vec3f, rd: vec3f) -> vec3f {
+      let poolMin = vec3f(-HW, -POOL_H, -HD);
+      let poolMax = vec3f(HW, 0.5, HD);
+
+      // Check sphere first
+      let sphereHit = raySphere(ro, rd, SPHERE_CENTER, SPHERE_R);
+      var sphereT = -1.0;
+      if (sphereHit.x > 0.001) {
+        sphereT = sphereHit.x;
+      } else if (sphereHit.y > 0.001) {
+        sphereT = sphereHit.y;
+      }
+
+      // Check pool inner box
+      let invRd = 1.0 / rd;
+      let poolHit = rayAABB(ro, invRd, poolMin, poolMax);
+      var poolT = -1.0;
+      if (poolHit.x < poolHit.y && poolHit.y > 0.001) {
+        poolT = max(poolHit.x, 0.001);
+      }
+
+      // Determine closest hit
+      var hitColor = vec3f(0.2, 0.45, 0.38); // default underwater color
+      var hitT = 100.0;
+
+      if (poolT > 0.0 && poolT < hitT) {
+        hitT = poolT;
+        let p = ro + rd * poolT;
+        let N = poolAABBNormal(p, poolMin, poolMax);
+        hitColor = shadePool(p, N, false);
+      }
+
+      if (sphereT > 0.0 && sphereT < hitT) {
+        hitT = sphereT;
+        let p = ro + rd * sphereT;
+        let N = normalize(p - SPHERE_CENTER);
+        hitColor = shadeSphere(p, N);
+      }
+
+      // Underwater absorption (lighter — clear pool water)
+      let absorb = exp(-hitT * vec3f(0.08, 0.025, 0.03));
+      hitColor *= absorb;
+
+      // Subtle water tint
+      let waterTint = vec3f(0.15, 0.38, 0.32);
+      hitColor = mix(waterTint, hitColor, exp(-hitT * 0.04));
+
+      return hitColor;
+    }
+
+    // ---- Intersect water surface via ray marching ----
+    fn traceWaterSurface(ro: vec3f, rd: vec3f) -> vec2f {
+      // Returns vec2(t, 1.0) on hit, vec2(-1.0, 0.0) on miss
+      // Only march within pool XZ bounds
+      let invRd = 1.0 / rd;
+      let waterMin = vec3f(-HW, -1.0, -HD);
+      let waterMax = vec3f(HW, 1.5, HD);
+      let bounds = rayAABB(ro, invRd, waterMin, waterMax);
+      if (bounds.x > bounds.y || bounds.y < 0.0) { return vec2f(-1.0, 0.0); }
+
+      let tStart = max(bounds.x, 0.001);
+      let tEnd = min(bounds.y, 80.0);
+      let steps = 48;
+      let dt = (tEnd - tStart) / f32(steps);
+      var tPrev = tStart;
+      var pPrev = ro + rd * tStart;
+      var hPrev = waterHeightAt(pPrev) - pPrev.y;
+
+      for (var i = 1; i <= steps; i++) {
+        let t = tStart + f32(i) * dt;
+        let p = ro + rd * t;
+        let h = waterHeightAt(p) - p.y;
+
+        if ((hPrev < 0.0 && h >= 0.0) || (hPrev >= 0.0 && h < 0.0)) {
+          // Crossed surface in either direction — binary refine
+          var tA = tPrev;
+          var tB = t;
+          for (var j = 0; j < 8; j++) {
+            let tM = (tA + tB) * 0.5;
+            let pM = ro + rd * tM;
+            let hM = waterHeightAt(pM) - pM.y;
+            if ((hPrev < 0.0) == (hM < 0.0)) { tA = tM; } else { tB = tM; }
+          }
+          return vec2f((tA + tB) * 0.5, 1.0);
+        }
+
+        tPrev = t;
+        hPrev = h;
+      }
+
+      return vec2f(-1.0, 0.0);
+    }
+
+    // ---- Intersect rim (outer box minus inner box) ----
+    fn traceRim(ro: vec3f, rd: vec3f) -> vec4f {
+      // Rim: outer box [OW, OD] from RIM_BOT to RIM_TOP, excluding inner pool box
+      let outerMin = vec3f(-OW, RIM_BOT, -OD);
+      let outerMax = vec3f(OW, RIM_TOP, OD);
+      let invRd = 1.0 / rd;
+      let outerHit = rayAABB(ro, invRd, outerMin, outerMax);
+      if (outerHit.x > outerHit.y || outerHit.y < 0.0) { return vec4f(0.0, 0.0, 0.0, -1.0); }
+
+      // Check if entering the outer box
+      let t = max(outerHit.x, 0.001);
+      var p = ro + rd * t;
+
+      // If the hit point is inside the inner pool region (not in the rim), skip to exit
+      let innerMin = vec3f(-HW, RIM_BOT - 0.01, -HD);
+      let innerMax = vec3f(HW, RIM_TOP + 0.01, HD);
+      if (p.x > innerMin.x && p.x < innerMax.x && p.z > innerMin.z && p.z < innerMax.z) {
+        // Ray enters through top of inner region — find where it exits inner box to hit rim wall
+        let innerHit = rayAABB(ro, invRd, innerMin, innerMax);
+        let tExit = innerHit.y;
+        if (tExit > outerHit.y || tExit < 0.0) { return vec4f(0.0, 0.0, 0.0, -1.0); }
+        p = ro + rd * tExit;
+        if (p.x < outerMin.x || p.x > outerMax.x || p.y < outerMin.y || p.y > outerMax.y || p.z < outerMin.z || p.z > outerMax.z) {
+          return vec4f(0.0, 0.0, 0.0, -1.0);
+        }
+        let N = poolAABBNormal(p, outerMin, outerMax);
+        let color = shadePool(p, N, true);
+        return vec4f(color, tExit);
+      }
+
+      let N = poolAABBNormal(p, outerMin, outerMax);
+      let color = shadePool(p, N, true);
+      return vec4f(color, t);
+    }
+
+    // ---- Main fragment shader ----
+    @fragment fn fs(in: VOut) -> @location(0) vec4f {
+      // Construct ray from camera through pixel
+      let ndc = vec2f(in.uv.x * 2.0 - 1.0, in.uv.y * 2.0 - 1.0);
+      let nearH = camera.invViewProj * vec4f(ndc, 0.0, 1.0);
+      let farH = camera.invViewProj * vec4f(ndc, 1.0, 1.0);
+      let nearP = nearH.xyz / nearH.w;
+      let farP = farH.xyz / farH.w;
+      let ro = camera.eye.xyz;
+      let rd = normalize(farP - nearP);
+
+      // ---- Gather all intersection candidates ----
+      var finalColor = BG_COLOR;
+      var closestT = 1e6;
+
+      // 1. Pool inner walls and floor (full depth)
+      let wallMin = vec3f(-HW, -POOL_H, -HD);
+      let wallMax = vec3f(HW, RIM_TOP, HD);
+      let invRd = 1.0 / rd;
+      let wallHit = rayAABB(ro, invRd, wallMin, wallMax);
+      if (wallHit.x < wallHit.y && wallHit.y > 0.0) {
+        var wt1 = max(wallHit.x, 0.001);
+        var wp1 = ro + rd * wt1;
+        var wN1 = poolAABBNormal(wp1, wallMin, wallMax);
+        // If entry is the top face (pool opening), try exit face instead
+        let isTopOpen = (abs(wN1.y) > 0.5 && wp1.y > RIM_TOP - 0.02);
+        if (isTopOpen) {
+          wt1 = wallHit.y;
+          wp1 = ro + rd * wt1;
+          wN1 = poolAABBNormal(wp1, wallMin, wallMax);
+        }
+        // Skip only the top opening face; render side walls and floor
+        let isStillTop = (abs(wN1.y) > 0.5 && wp1.y > RIM_TOP - 0.02);
+        if (!isStillTop && wt1 > 0.001 && wt1 < closestT) {
+          closestT = wt1;
+          var wallColor = shadePool(wp1, wN1, false);
+          // Apply water absorption for underwater surfaces
+          if (wp1.y < 0.0) {
+            let waterPath = max(-wp1.y, 0.0);
+            let absorb = exp(-waterPath * vec3f(0.08, 0.025, 0.03));
+            wallColor *= absorb;
+            let waterTint = vec3f(0.15, 0.38, 0.32);
+            wallColor = mix(waterTint, wallColor, exp(-waterPath * 0.04));
+          }
+          finalColor = wallColor;
+        }
+      }
+
+      // 2. Rim
+      let rimResult = traceRim(ro, rd);
+      if (rimResult.w > 0.0 && rimResult.w < closestT) {
+        closestT = rimResult.w;
+        finalColor = rimResult.xyz;
+      }
+
+      // 3. Sphere (above-water portion)
+      let sphereHit = raySphere(ro, rd, SPHERE_CENTER, SPHERE_R);
+      if (sphereHit.x > 0.001 && sphereHit.x < closestT) {
+        let p = ro + rd * sphereHit.x;
+        if (p.y > 0.0) {
+          closestT = sphereHit.x;
+          let N = normalize(p - SPHERE_CENTER);
+          finalColor = shadeSphere(p, N);
+        }
+      }
+
+      // 4. Water surface
+      let waterHit = traceWaterSurface(ro, rd);
+      if (waterHit.y > 0.5 && waterHit.x < closestT) {
+        let wt = waterHit.x;
+        let wp = ro + rd * wt;
+        let wN = waterNormalAt(wp);
+        let V = normalize(ro - wp);
+        let NdotV = max(dot(wN, V), 0.0);
+        let fresnel = schlick(NdotV, WATER_IOR);
+
+        // Refracted ray
+        let refractDir = refract(-V, wN, 1.0 / WATER_IOR);
+        var underwaterColor = vec3f(0.15, 0.35, 0.30);
+        if (length(refractDir) > 0.001) {
+          underwaterColor = traceUnderwater(wp - wN * 0.01, refractDir);
+        }
+
+        // Reflected ray
+        let reflDir = reflect(-V, wN);
+        let reflectedColor = skyColor(reflDir);
+
+        // Fresnel blend
+        var color = mix(underwaterColor, reflectedColor, fresnel);
+
+        // Specular highlights
+        let L = normalize(light.dir.xyz);
+        let H = normalize(V + L);
+        let spec = pow(max(dot(wN, H), 0.0), 512.0) * 0.8;
+        let L2 = normalize(vec3f(-0.3, 0.8, -0.5));
+        let H2 = normalize(V + L2);
+        let spec2 = pow(max(dot(wN, H2), 0.0), 256.0) * 0.15;
+        color += vec3f(spec + spec2);
+
+        closestT = wt;
+        finalColor = color;
+      }
+
+      // Light tone mapping — only compress highlights, preserve midtones
+      finalColor = vec3f(1.0) - exp(-finalColor * 1.2);
+
+      return vec4f(finalColor, 1.0);
+    }
+  `,
+        });
+
+        const rayMarchBGL = device.createBindGroupLayout({
+          entries: [
+            {
+              binding: 0,
+              visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+              buffer: { type: "uniform" },
+            },
+            {
+              binding: 1,
+              visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+              buffer: { type: "uniform" },
+            },
+            {
+              binding: 2,
+              visibility: GPUShaderStage.FRAGMENT,
+              buffer: { type: "read-only-storage" },
+            },
+          ],
+        });
+
+        function getRayMarchBindGroup(currentBuf) {
+          return device.createBindGroup({
+            layout: rayMarchBGL,
+            entries: [
+              { binding: 0, resource: { buffer: cameraBuffer } },
+              { binding: 1, resource: { buffer: lightBuffer } },
+              { binding: 2, resource: { buffer: currentBuf } },
+            ],
+          });
+        }
+
+        const rayMarchPipeline = device.createRenderPipeline({
+          layout: device.createPipelineLayout({
+            bindGroupLayouts: [rayMarchBGL],
+          }),
+          vertex: {
+            module: rayMarchShader,
+            entryPoint: "vs",
+            buffers: [],
+          },
+          fragment: {
+            module: rayMarchShader,
+            entryPoint: "fs",
+            targets: [{ format }],
+          },
+          primitive: { topology: "triangle-list" },
+          depthStencil: {
+            depthWriteEnabled: true,
+            depthCompare: "less",
+            format: "depth24plus",
+          },
+          multisample: { count: 4 },
+        });
+
+        // ========== LIGHT SETUP ==========
+        const lightData = new Float32Array([
+          0.4,
+          0.9,
+          0.3,
+          0, // direction (normalized in shader)
+          1.0,
+          0.98,
+          0.95,
+          0, // color
+          0.25,
+          0.28,
+          0.3,
+          0, // ambient
+        ]);
+        device.queue.writeBuffer(lightBuffer, 0, lightData);
+
+        // ========== RENDER LOOP ==========
+        let time = 0;
+        let lastTime = performance.now() / 1000;
+        let nextAutoDropTime = 0;
+        let frameCount = 0;
+
+        function frame(now) {
+          requestAnimationFrame(frame);
+          now /= 1000;
+          const dt = Math.min(now - lastTime, 0.05);
+          lastTime = now;
+          time += dt;
+          frameCount++;
+
+          // Resize check
+          const dpr = window.devicePixelRatio || 1;
+          const w = Math.floor(canvas.clientWidth * dpr);
+          const h = Math.floor(canvas.clientHeight * dpr);
+          if (canvas.width !== w || canvas.height !== h) {
+            canvas.width = w;
+            canvas.height = h;
+            ctx.configure({ device, format, alphaMode: "opaque" });
+          }
+          ensureDepthTexture();
+          ensureMSAATexture();
+
+          // Camera update
+          if (autoOrbit) {
+            camTheta += dt * 0.12;
+          }
+          const eye = [
+            camTarget[0] + camDist * Math.sin(camPhi) * Math.cos(camTheta),
+            camTarget[1] + camDist * Math.cos(camPhi),
+            camTarget[2] + camDist * Math.sin(camPhi) * Math.sin(camTheta),
+          ];
+          viewMat = mat4LookAt(eye, camTarget, [0, 1, 0]);
+          projMat = mat4Perspective(
+            Math.PI / 4,
+            canvas.width / canvas.height,
+            0.1,
+            100,
+          );
+
+          const vpMat = mat4Mul(projMat, viewMat);
+          const invVP = mat4Invert(vpMat);
+
+          // Camera: view(16) + proj(16) + eye(4) + invViewProj(16) = 52 floats (but eye is padded to vec4 = 4 floats) => 56 floats = 224 bytes
+          const camData = new Float32Array(56);
+          camData.set(viewMat, 0); // offset 0: view mat (16 floats)
+          camData.set(projMat, 16); // offset 16: proj mat (16 floats)
+          camData.set([eye[0], eye[1], eye[2], 1], 32); // offset 32: eye vec4 (4 floats)
+          if (invVP) {
+            camData.set(invVP, 36); // offset 36: invViewProj mat (16 floats)
+          }
+          // total: 36 + 16 = 52 floats, padded in buffer to 56 (224 bytes)
+          device.queue.writeBuffer(cameraBuffer, 0, camData);
+
+          // Auto drops
+          if (time > nextAutoDropTime) {
+            const x = 0.2 + Math.random() * 0.6;
+            const y = 0.2 + Math.random() * 0.6;
+            pendingDrops.push({
+              x,
+              y,
+              radius: 0.015 + Math.random() * 0.02,
+              strength: 0.8 + Math.random() * 1.5,
+            });
+            nextAutoDropTime = time + 1.5 + Math.random() * 2.0;
+          }
+
+          // Sphere grid coords for wave interaction
+          const sphereGX = (SPHERE_POS[0] / (POOL_W * 0.5) + 1) * 0.5;
+          const sphereGZ = (SPHERE_POS[2] / (POOL_D * 0.5) + 1) * 0.5;
+          const sphereCenterY = SPHERE_POS[1];
+          const footprintR = Math.sqrt(
+            Math.max(
+              0,
+              SPHERE_RADIUS * SPHERE_RADIUS - sphereCenterY * sphereCenterY,
+            ),
+          );
+          const sphereGR = footprintR / POOL_W;
+
+          const drop = pendingDrops.shift() || {
+            x: -1,
+            y: -1,
+            radius: 0,
+            strength: 0,
+          };
+
+          const paramsData = new Float32Array([
+            time,
+            dt,
+            0.998,
+            0.23,
+            drop.x,
+            drop.y,
+            drop.radius,
+            drop.strength,
+            sphereGX,
+            sphereGZ,
+            sphereGR,
+            0.0,
+          ]);
+          device.queue.writeBuffer(paramsBuffer, 0, paramsData);
+
+          // Compute passes
+          {
+            const encoder1 = device.createCommandEncoder();
+            const computeBG = getComputeBindGroup();
+            const pass = encoder1.beginComputePass();
+            pass.setPipeline(computePipeline);
+            pass.setBindGroup(0, computeBG);
+            pass.dispatchWorkgroups(Math.ceil(GRID / 8), Math.ceil(GRID / 8));
+            pass.end();
+            device.queue.submit([encoder1.finish()]);
+            bufState = (bufState + 1) % 3;
+          }
+
+          const noDrop = new Float32Array([0, 0, 0, 0]);
+          device.queue.writeBuffer(paramsBuffer, 16, noDrop);
+
+          for (let s = 1; s < 3; s++) {
+            const enc = device.createCommandEncoder();
+            const computeBG = getComputeBindGroup();
+            const pass = enc.beginComputePass();
+            pass.setPipeline(computePipeline);
+            pass.setBindGroup(0, computeBG);
+            pass.dispatchWorkgroups(Math.ceil(GRID / 8), Math.ceil(GRID / 8));
+            pass.end();
+            device.queue.submit([enc.finish()]);
+            bufState = (bufState + 1) % 3;
+          }
+
+          // Render pass
+          const encoder = device.createCommandEncoder();
+          const textureView = ctx.getCurrentTexture().createView();
+          const renderPass = encoder.beginRenderPass({
+            colorAttachments: [
+              {
+                view: msaaTex.createView(),
+                resolveTarget: textureView,
+                clearValue: { r: 0.18, g: 0.22, b: 0.25, a: 1 },
+                loadOp: "clear",
+                storeOp: "store",
+              },
+            ],
+            depthStencilAttachment: {
+              view: depthTex.createView(),
+              depthClearValue: 1.0,
+              depthLoadOp: "clear",
+              depthStoreOp: "store",
+            },
+          });
+
+          const currentBuf = bufs[bufState % 3];
+          const rayBG = getRayMarchBindGroup(currentBuf);
+          renderPass.setPipeline(rayMarchPipeline);
+          renderPass.setBindGroup(0, rayBG);
+          renderPass.draw(3);
+
+          renderPass.end();
+          device.queue.submit([encoder.finish()]);
+        }
+
+        requestAnimationFrame(frame);
+      }
+
+      main().catch((e) => {
+        console.error(e);
+        document.getElementById("error").style.display = "block";
+        document.getElementById("error").textContent = "Error: " + e.message;
+      });
+    </script>
+  </body>
+</html>
