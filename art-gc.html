@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ART 虚拟机的 GC 是如何工作的</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+  --bg:#EEF2F5; --panel:#FFFFFF; --ink:#16232E; --ink-2:#4B5B68; --ink-3:#8A98A4; --line:#D4DCE3;
+  --live:#1D9E75; --gray:#EF9F27; --gc:#7F77DD; --mut:#D85A30; --dead:#B4B2A9;
+  --from-bg:#FAECE7; --from-line:#D85A30; --to-bg:#EEEDFE; --to-line:#534AB7; --un-bg:#E1F5EE; --un-line:#1D9E75;
+  --alloc-bg:#F3F5F7; --alloc-line:#B4BEC7; --free-bg:transparent; --free-line:#C5CED6;
+  --stw:#E24B4A; --run:#1D9E75; --idle:#B4B2A9;
+  --font:"Manrope",system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Noto Sans CJK SC","Microsoft YaHei",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#111A21; --panel:#18232C; --ink:#EAF0F4; --ink-2:#AEBBC6; --ink-3:#6F7F8C; --line:#2A3945;
+    --from-bg:#3A1F16; --from-line:#F0997B; --to-bg:#26215C; --to-line:#AFA9EC; --un-bg:#0B3A2E; --un-line:#5DCAA5;
+    --alloc-bg:#1F2B35; --alloc-line:#4A5A68; --free-line:#34434F; --dead:#5F5E5A;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#111A21; --panel:#18232C; --ink:#EAF0F4; --ink-2:#AEBBC6; --ink-3:#6F7F8C; --line:#2A3945;
+  --from-bg:#3A1F16; --from-line:#F0997B; --to-bg:#26215C; --to-line:#AFA9EC; --un-bg:#0B3A2E; --un-line:#5DCAA5;
+  --alloc-bg:#1F2B35; --alloc-line:#4A5A68; --free-line:#34434F; --dead:#5F5E5A;
+}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*,*::before,*::after{box-sizing:inherit}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:16px;line-height:1.65;-webkit-font-smoothing:antialiased}
+a{color:inherit}
+.wrap{max-width:1080px;margin:0 auto;padding:0 20px}
+
+header{padding:56px 0 28px}
+.eyebrow{font-family:var(--mono);font-size:13px;color:var(--ink-3);margin:0 0 14px}
+h1{font-size:clamp(30px,4.6vw,48px);line-height:1.12;font-weight:700;letter-spacing:-0.02em;margin:0 0 16px;max-width:20ch}
+.lede{font-size:17px;color:var(--ink-2);max-width:62ch;margin:0}
+
+.stage{display:grid;grid-template-columns:260px minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:820px){.stage{grid-template-columns:minmax(0,1fr)}}
+.steps{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:8px;margin:0;list-style:none}
+.steps li{display:grid;grid-template-columns:28px 1fr;gap:10px;align-items:baseline;padding:10px 10px;border-radius:9px;cursor:pointer;color:var(--ink-2);font-size:15px;line-height:1.35}
+.steps li:hover{background:var(--alloc-bg)}
+.steps li[aria-current="step"]{background:var(--ink);color:var(--bg)}
+.steps li .n{font-family:var(--mono);font-size:12px;color:var(--ink-3)}
+.steps li[aria-current="step"] .n{color:var(--bg);opacity:.7}
+.steps li .tag{display:inline-block;font-family:var(--mono);font-size:11px;padding:1px 6px;border-radius:4px;margin-left:6px;vertical-align:1px;background:var(--stw);color:#fff}
+.steps li[aria-current="step"] .tag{background:#fff;color:var(--stw)}
+.controls{display:flex;gap:8px;padding:10px 8px 4px;border-top:1px solid var(--line);margin-top:6px}
+button{font:inherit;font-size:14px;font-weight:500;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:8px 12px;cursor:pointer}
+button:hover{background:var(--alloc-bg)}
+button:focus-visible,.steps li:focus-visible{outline:2px solid var(--gc);outline-offset:2px}
+button.primary{background:var(--ink);color:var(--bg);border-color:var(--ink);flex:1}
+
+.heap{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px 12px;overflow:hidden}
+.heap svg{width:100%;height:auto;display:block}
+.status{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 12px}
+.pill{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:500;padding:6px 12px;border-radius:999px;border:1px solid var(--line);background:var(--bg)}
+.pill i{width:9px;height:9px;border-radius:50%;background:var(--idle);flex:none}
+.pill.run i{background:var(--run)}
+.pill.stw i{background:var(--stw);animation:blink .8s steps(2) infinite}
+.pill.on i{background:var(--gray)}
+@keyframes blink{50%{opacity:.25}}
+@media (prefers-reduced-motion:reduce){.pill.stw i{animation:none}}
+.caption{min-height:52px;margin:12px 0 4px;font-size:15px;color:var(--ink-2);border-top:1px solid var(--line);padding-top:12px}
+.caption b{color:var(--ink);font-weight:700}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12px;color:var(--ink-3);margin-top:8px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:10px;height:10px;border-radius:50%;flex:none}
+
+.obj{transition:transform .9s cubic-bezier(.4,0,.2,1),opacity .6s}
+.obj circle{transition:fill .5s,stroke .5s}
+.ghost{transition:opacity .6s}
+.region rect{transition:fill .5s,stroke .5s}
+@media (prefers-reduced-motion:reduce){.obj,.obj circle,.ghost,.region rect{transition:none}}
+.rlabel{font-family:var(--mono);font-size:11px;fill:var(--ink-3)}
+.rname{font-family:var(--font);font-size:12px;font-weight:500;fill:var(--ink-2)}
+.region.from .rname{fill:var(--from-line)}
+.region.to .rname{fill:var(--to-line)}
+.region.un .rname{fill:var(--un-line)}
+.region.from rect{fill:var(--from-bg);stroke:var(--from-line)}
+.region.to rect{fill:var(--to-bg);stroke:var(--to-line)}
+.region.un rect{fill:var(--un-bg);stroke:var(--un-line)}
+.region.alloc rect{fill:var(--alloc-bg);stroke:var(--alloc-line)}
+.region.free rect{fill:var(--free-bg);stroke:var(--free-line);stroke-dasharray:4 4}
+.meter-bg{fill:var(--alloc-bg)}
+.meter-fill{fill:var(--gc);transition:width .6s}
+.meter-thr{stroke:var(--stw);stroke-dasharray:3 3}
+.mtext{font-family:var(--mono);font-size:11px;fill:var(--ink-3)}
+
+.timeline{margin:40px 0 0}
+.timeline h2,.concepts h2,.cmc h2{font-size:clamp(22px,3vw,28px);letter-spacing:-0.015em;margin:0 0 6px;font-weight:700}
+.timeline p.sub,.concepts p.sub{color:var(--ink-2);margin:0 0 18px;max-width:62ch}
+.tl{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 18px 10px}
+.tl svg{width:100%;height:auto;display:block}
+.tlabel{font-family:var(--font);font-size:12px;fill:var(--ink-2)}
+.tsmall{font-family:var(--mono);font-size:11px;fill:var(--ink-3)}
+
+.concepts{margin:44px 0 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px}
+.card h3{font-size:17px;margin:0 0 8px;font-weight:700}
+.card p{margin:0;font-size:15px;color:var(--ink-2)}
+.card code{font-family:var(--mono);font-size:13px;background:var(--alloc-bg);padding:1px 5px;border-radius:4px;color:var(--ink)}
+
+.cmc{margin:44px 0 0;border-top:1px solid var(--line);padding-top:32px}
+.cmc p{max-width:66ch;color:var(--ink-2)}
+.cmp{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:16px}
+.cmp div{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;font-size:14px}
+.cmp div strong{display:block;font-size:15px;margin-bottom:6px}
+.cmp ul{margin:0;padding-left:18px;color:var(--ink-2)}
+.cmp li{margin:3px 0}
+footer{padding:48px 0 40px;color:var(--ink-3);font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <p class="eyebrow">android runtime · concurrent copying collector</p>
+  <h1>ART 虚拟机的 GC 是如何工作的</h1>
+  <p class="lede">Android 8.0 起，ART 默认使用 Concurrent Copying 收集器：堆被切成固定大小的 region，GC 线程在应用几乎不停顿的情况下把存活对象复制到新 region，用读屏障保证应用线程永远看到正确的那一份。下面按一轮回收的顺序逐步演示。</p>
+</header>
+
+<section class="stage" aria-label="GC 阶段演示">
+  <div>
+    <ol class="steps" id="steps"></ol>
+    <div class="controls">
+      <button id="prev" aria-label="上一步">‹</button>
+      <button id="play" class="primary">自动播放</button>
+      <button id="next" aria-label="下一步">›</button>
+    </div>
+  </div>
+
+  <div class="heap">
+    <div class="status">
+      <span class="pill" id="pMut"><i></i><span>应用线程：运行中</span></span>
+      <span class="pill" id="pGc"><i></i><span>GC 线程：空闲</span></span>
+      <span class="pill" id="pRb"><i></i><span>读屏障：关</span></span>
+    </div>
+    <svg id="heap" viewBox="0 0 760 420" role="img" aria-labelledby="heapTitle heapDesc">
+      <title id="heapTitle">ART 堆的 region 视图</title>
+      <desc id="heapDesc">八个 region 组成的堆，对象在阶段之间从 from-space 复制到 to-space。</desc>
+      <g id="regions"></g>
+      <g id="ghosts"></g>
+      <g id="objs"></g>
+      <g id="meter">
+        <text class="mtext" x="0" y="392">堆占用</text>
+        <rect class="meter-bg" x="60" y="384" width="560" height="10" rx="5"/>
+        <rect class="meter-fill" id="meterFill" x="60" y="384" width="0" height="10" rx="5"/>
+        <line class="meter-thr" x1="452" y1="380" x2="452" y2="398" stroke-width="1.5"/>
+        <text class="mtext" x="452" y="414" text-anchor="middle">触发阈值</text>
+        <text class="mtext" id="meterTxt" x="632" y="392">0%</text>
+      </g>
+    </svg>
+    <p class="caption" id="caption"></p>
+    <div class="legend">
+      <span><i style="background:var(--live)"></i>存活 / 已标记</span>
+      <span><i style="background:var(--gray)"></i>灰色（待扫描）</span>
+      <span><i style="background:var(--gc)"></i>GC 线程复制</span>
+      <span><i style="background:var(--mut)"></i>读屏障复制</span>
+      <span><i style="background:var(--dead)"></i>垃圾</span>
+      <span><i style="border:1px dashed var(--dead)"></i>转发指针</span>
+    </div>
+  </div>
+</section>
+
+<section class="timeline">
+  <h2>一轮回收里谁在什么时候停</h2>
+  <p class="sub">CC 只有两次极短的 stop-the-world，其余时间应用线程和 GC 线程并行运行。这也是它相比老的 Concurrent Mark-Sweep 卡顿更少的根本原因。</p>
+  <div class="tl">
+    <svg viewBox="0 0 760 150" role="img" aria-label="一轮 GC 的时间线，应用线程与 GC 线程并行，两处短暂停">
+      <text class="tlabel" x="0" y="40">应用线程</text>
+      <text class="tlabel" x="0" y="90">GC 线程</text>
+      <rect x="90" y="28" width="640" height="16" rx="4" fill="var(--run)" opacity=".85"/>
+      <rect x="230" y="24" width="6" height="24" rx="2" fill="var(--stw)"/>
+      <rect x="560" y="24" width="4" height="24" rx="2" fill="var(--stw)"/>
+      <rect x="90" y="78" width="70" height="16" rx="4" fill="var(--idle)" opacity=".6"/>
+      <rect x="160" y="78" width="470" height="16" rx="4" fill="var(--gc)" opacity=".9"/>
+      <rect x="630" y="78" width="100" height="16" rx="4" fill="var(--idle)" opacity=".6"/>
+      <line x1="233" y1="52" x2="233" y2="112" stroke="var(--stw)" stroke-width="1" stroke-dasharray="3 3"/>
+      <line x1="562" y1="52" x2="562" y2="112" stroke="var(--stw)" stroke-width="1" stroke-dasharray="3 3"/>
+      <text class="tsmall" x="233" y="128" text-anchor="middle">暂停 1：翻转线程根</text>
+      <text class="tsmall" x="562" y="128" text-anchor="middle">暂停 2：弱引用</text>
+      <text class="tsmall" x="125" y="112" text-anchor="middle">分配</text>
+      <text class="tsmall" x="395" y="112" text-anchor="middle">并发标记 + 复制</text>
+      <text class="tsmall" x="680" y="112" text-anchor="middle">回收 region</text>
+    </svg>
+  </div>
+</section>
+
+<section class="concepts">
+  <h2>让它能并发的几个关键设计</h2>
+  <p class="sub">复制式 GC 的难点在于：复制过程中对象同时存在两份，应用线程随时可能读到旧的那一份。CC 的解法不是让应用停下来等，而是把检查放在“读”这个动作上。</p>
+  <div class="grid">
+    <div class="card">
+      <h3>读屏障（Baker read barrier）</h3>
+      <p>编译器在每次读取引用字段时插入一小段检查：引用若指向 from-space，就跟着转发指针拿到新地址，对象还没搬的话由应用线程当场复制。于是应用线程只会看到 to-space 里的对象，不需要写屏障去追踪修改。</p>
+    </div>
+    <div class="card">
+      <h3>region 与整体释放</h3>
+      <p>堆按 <code>256 KB</code> 一块划成 region。复制完成后 from-space 的 region 直接标空，不用逐个对象释放；存活对象在 to-space 紧挨着排列，碎片自然消失。</p>
+    </div>
+    <div class="card">
+      <h3>存活率高的 region 不搬</h3>
+      <p>如果一个 region 里大部分对象都活着，复制它得不偿失。CC 会把它标成 unevacuated，只在原地标记，下一轮再看。</p>
+    </div>
+    <div class="card">
+      <h3>分代（Android 10+）</h3>
+      <p>年轻代模式下大多数回收只处理最近分配的 region，隔几轮才做一次全堆回收。新对象大多很快死亡，这样每轮要复制的东西少得多。</p>
+    </div>
+    <div class="card">
+      <h3>TLAB 分配</h3>
+      <p>每个线程持有一小段 region（thread-local allocation buffer），分配只是指针后移，不加锁；用完再向堆申请下一段。</p>
+    </div>
+    <div class="card">
+      <h3>两次暂停各做什么</h3>
+      <p>暂停 1 把线程栈上的根标成灰色、翻转线程状态并打开读屏障；暂停 2 处理弱引用、finalizer 并扫完残余灰色对象。两次通常都在毫秒以内。</p>
+    </div>
+  </div>
+</section>
+
+<section class="cmc">
+  <h2>之后的演进：Concurrent Mark-Compact</h2>
+  <p>Android 14 起，在内核支持 <code>userfaultfd</code> 的设备上，ART 改用 CMC 收集器。它不再靠读屏障，而是在页粒度上做并发压缩：应用线程碰到还没搬完的页时，由内核触发缺页，GC 线程先把那一页整理好再放行。整体思路仍是并发 + 移动对象 + 极短暂停，但去掉了每次读引用都要付出的屏障开销。</p>
+  <div class="cmp">
+    <div><strong>Concurrent Copying（8.0 – 13）</strong><ul><li>对象粒度复制</li><li>每次读引用带读屏障</li><li>堆需要预留 to-space</li></ul></div>
+    <div><strong>Concurrent Mark-Compact（14+）</strong><ul><li>页粒度原地压缩</li><li>无读屏障，靠 userfaultfd</li><li>内存占用更低、吞吐更高</li></ul></div>
+  </div>
+</section>
+
+<footer>阶段划分与术语参考 AOSP 中 <code>art/runtime/gc/collector/concurrent_copying.cc</code>，为讲解做了简化。</footer>
+</div>
+
+<script>
+(function(){
+const NS='http://www.w3.org/2000/svg';
+const masks=[[1,0,1,0,0,1,0,1,0],[0,1,0,1,1,0,0,0,1],[1,0,0,0,1,0,1,0,0],[0,1,1,0,0,0,1,0,1],[1,1,1,1,0,1,1,1,1]];
+const roots=[[0,0],[1,1],[2,0],[3,1],[4,0]];
+const MUT=[1,1];
+const FILL={live:'var(--live)',gray:'var(--gray)',gc:'var(--gc)',mut:'var(--mut)',dead:'var(--dead)'};
+const RW=172,RH=132,GX=24,GY=22;
+function rpos(r){return [(r%4)*(RW+GX),12+Math.floor(r/4)*(RH+GY)];}
+function spos(r,s){const p=rpos(r);return [p[0]+30+(s%3)*56,p[1]+52+Math.floor(s/3)*32];}
+function addr(r){return '0x'+(0x12c00000+r*0x40000).toString(16);}
+
+const objs=[];
+masks.forEach((m,r)=>m.forEach((l,s)=>objs.push({r,s,live:!!l,root:roots.some(q=>q[0]==r&&q[1]==s),mut:r==MUT[0]&&s==MUT[1]})));
+const dest=[];{let k=1;const mo=objs.find(o=>o.mut);dest.push([mo,[5,0]]);objs.forEach(o=>{if(o.live&&o.r<4&&!o.mut){dest.push([o,[5+Math.floor(k/9),k%9]]);k++;}});}
+const dmap=new Map(dest.map(d=>[d[0],d[1]]));
+
+const gR=document.getElementById('regions'),gO=document.getElementById('objs'),gG=document.getElementById('ghosts');
+const regEls=[];
+for(let r=0;r<8;r++){
+  const [x,y]=rpos(r);
+  const g=document.createElementNS(NS,'g');g.setAttribute('class','region');
+  const rc=document.createElementNS(NS,'rect');
+  rc.setAttribute('x',x);rc.setAttribute('y',y);rc.setAttribute('width',RW);rc.setAttribute('height',RH);rc.setAttribute('rx',10);rc.setAttribute('stroke-width','1');
+  const a=document.createElementNS(NS,'text');a.setAttribute('class','rlabel');a.setAttribute('x',x+12);a.setAttribute('y',y+20);a.textContent=addr(r);
+  const t=document.createElementNS(NS,'text');t.setAttribute('class','rname');t.setAttribute('x',x+RW-12);t.setAttribute('y',y+20);t.setAttribute('text-anchor','end');
+  g.append(rc,a,t);gR.appendChild(g);regEls.push({g,t});
+}
+objs.forEach(o=>{
+  const g=document.createElementNS(NS,'g');g.setAttribute('class','obj');
+  const c=document.createElementNS(NS,'circle');c.setAttribute('r',10);c.setAttribute('fill',FILL.live);
+  g.appendChild(c);gO.appendChild(g);o.el=g;o.c=c;
+  const [x,y]=spos(o.r,o.s);g.setAttribute('transform','translate('+x+','+y+')');
+  const gh=document.createElementNS(NS,'circle');gh.setAttribute('class','ghost');
+  gh.setAttribute('cx',x);gh.setAttribute('cy',y);gh.setAttribute('r',10);gh.setAttribute('fill','none');gh.setAttribute('stroke','var(--dead)');gh.setAttribute('stroke-dasharray','3 3');gh.setAttribute('opacity','0');
+  gG.appendChild(gh);o.gh=gh;
+});
+
+const A=['alloc','alloc','alloc','alloc','alloc','free','free','free'];
+const F=['from','from','from','from','un','to','to','free'];
+const E=['free','free','free','free','alloc','alloc','alloc','free'];
+const phases=[
+ {n:'分配',cap:'<b>分配。</b>应用线程通过 TLAB 在 region 里连续分配对象，堆逐渐填满。这时还没人知道哪些对象已经死了。',mut:'run',gc:'idle',rb:false,reg:A,use:48,st:function(o){return ['live',0];}},
+ {n:'触发',cap:'<b>触发。</b>分配量越过阈值，唤醒后台 GC 线程，准备开始一轮并发回收。',mut:'run',gc:'run',rb:false,reg:A,use:72,st:function(o){return ['live',0];}},
+ {n:'暂停 1',stw:true,cap:'<b>FlipThreadRoots。</b>短暂停顿：把线程栈上的根对象标成灰色，翻转线程状态并打开读屏障。旧 region 成为 from-space，存活率高的 region 标为 unevacuated 原地保留。',mut:'stw',gc:'run',rb:true,reg:F,use:72,st:function(o){return [o.root?'gray':'live',0];}},
+ {n:'读屏障',cap:'<b>读屏障介入。</b>应用线程恢复运行。它读到指向 from-space 的引用时，读屏障让它自己把对象复制到 to-space 并更新引用，所以应用线程永远只看到新副本。',mut:'run',gc:'run',rb:true,reg:F,use:74,st:function(o){return o.mut?['mut',1]:[o.root?'gray':'live',0];}},
+ {n:'并发复制',cap:'<b>并发标记与复制。</b>GC 线程逐个扫描灰色对象，把它引用到的存活对象复制到 to-space，旧位置留下转发指针；从来没被引用到的对象就是垃圾。',mut:'run',gc:'run',rb:true,reg:F,use:82,st:function(o){return o.mut?['mut',1]:o.live?(o.r<4?['gc',1]:['live',0]):['dead',0];}},
+ {n:'暂停 2',stw:true,cap:'<b>第二次暂停。</b>极短停顿：处理弱引用与 finalizer，扫完残余的灰色对象，标记正式结束。',mut:'stw',gc:'run',rb:true,reg:F,use:82,st:function(o){return o.live?['live',o.r<4?1:0]:['dead',0];}},
+ {n:'回收',cap:'<b>整体释放。</b>from-space 的 region 直接标空，不用逐个清扫；转发指针和垃圾一起消失，存活对象在 to-space 紧挨着排列。',mut:'run',gc:'run',rb:false,reg:E,use:34,st:function(o){return o.live?['live',o.r<4?1:0]:['gone',0];}},
+ {n:'完成',cap:'<b>下一轮。</b>to-space 成为新的堆，GC 线程回到空闲。之后通常先做几次只处理新 region 的年轻代回收，再做全堆回收。',mut:'run',gc:'idle',rb:false,reg:E,use:34,st:function(o){return o.live?['live',o.r<4?1:0]:['gone',0];}}
+];
+const RN={alloc:'已分配',free:'空闲',from:'from-space',to:'to-space',un:'unevacuated'};
+
+const steps=document.getElementById('steps');
+phases.forEach(function(p,i){
+  const li=document.createElement('li');li.tabIndex=0;li.setAttribute('role','button');
+  li.innerHTML='<span class="n">'+String(i+1).padStart(2,'0')+'</span><span>'+p.n+(p.stw?'<span class="tag">STW</span>':'')+'</span>';
+  li.addEventListener('click',function(){stop();cur=i;render();});
+  li.addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();stop();cur=i;render();}});
+  steps.appendChild(li);
+});
+
+let cur=0,timer=null;
+function pill(id,cls,txt){const el=document.getElementById(id);el.className='pill '+cls;el.lastElementChild.textContent=txt;}
+function render(){
+  const p=phases[cur];
+  pill('pMut',p.mut,p.mut==='stw'?'应用线程：暂停 (STW)':'应用线程：运行中');
+  pill('pGc',p.gc,p.gc==='run'?'GC 线程：运行中':'GC 线程：空闲');
+  pill('pRb',p.rb?'on':'',p.rb?'读屏障：开':'读屏障：关');
+  p.reg.forEach(function(k,i){regEls[i].g.setAttribute('class','region '+k);regEls[i].t.textContent=RN[k];});
+  objs.forEach(function(o){
+    const r=p.st(o),s=r[0],moved=r[1];
+    const pos=moved&&dmap.has(o)?spos.apply(null,dmap.get(o)):spos(o.r,o.s);
+    o.el.setAttribute('transform','translate('+pos[0]+','+pos[1]+')');
+    o.el.style.opacity=s==='gone'?0:1;
+    o.c.setAttribute('fill',FILL[s]||FILL.dead);
+    o.gh.setAttribute('opacity',moved&&p.reg[0]==='from'?1:0);
+  });
+  document.getElementById('meterFill').setAttribute('width',Math.round(560*p.use/100));
+  document.getElementById('meterTxt').textContent=p.use+'%';
+  Array.prototype.forEach.call(steps.children,function(li,i){if(i===cur)li.setAttribute('aria-current','step');else li.removeAttribute('aria-current');});
+  document.getElementById('caption').innerHTML=p.cap;
+}
+function go(d){cur=(cur+d+phases.length)%phases.length;render();}
+function stop(){if(timer){clearInterval(timer);timer=null;document.getElementById('play').textContent='自动播放';}}
+function togglePlay(){if(timer){stop();}else{timer=setInterval(function(){go(1);},2800);document.getElementById('play').textContent='暂停';}}
+document.getElementById('prev').addEventListener('click',function(){stop();go(-1);});
+document.getElementById('next').addEventListener('click',function(){stop();go(1);});
+document.getElementById('play').addEventListener('click',togglePlay);
+document.addEventListener('keydown',function(e){
+  if(e.target.tagName==='BUTTON'||e.target.tagName==='LI')return;
+  if(e.key==='ArrowRight'){stop();go(1);}else if(e.key==='ArrowLeft'){stop();go(-1);}else if(e.key===' '){e.preventDefault();togglePlay();}
+});
+render();
+})();
+</script>
+</body>
+</html>
