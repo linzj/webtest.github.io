@@ -1,0 +1,561 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>竖式小课堂</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600&family=ZCOOL+KuaiLe&display=swap">
+<style>
+/* 布局：上面选运算和出题；下面左边是方格本（深色时是黑板）上的竖式，右边是这一步的讲解和播放按钮；手机上竖着排。 */
+:root{
+  --bg:#EDF3EB; --card:#FFFFFF; --paper:#FBFDF8; --grid:#CFE5D6; --line:#C9D8CC;
+  --ink:#22304F; --muted:#5A6779; --red:#D5382C; --hl:#FFE682;
+  --accent:#1B7F53; --accent-ink:#FFFFFF; --accent-soft:#DDF0E4;
+  --f-title:"ZCOOL KuaiLe","PingFang SC","Microsoft YaHei",sans-serif;
+  --f-body:"PingFang SC","HarmonyOS Sans SC","Microsoft YaHei","Noto Sans SC",system-ui,sans-serif;
+  --f-num:"Fredoka","Arial Rounded MT Bold","PingFang SC","Microsoft YaHei",sans-serif;
+  --cell:clamp(36px,10.5vw,62px);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0F211C; --card:#16302A; --paper:#1B3A31; --grid:#29493F; --line:#2E4F44;
+  --ink:#F1F4E8; --muted:#A9B9AF; --red:#FF9E8F; --hl:#5F6230;
+  --accent:#74D6A6; --accent-ink:#0E2019; --accent-soft:#214538; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0F211C; --card:#16302A; --paper:#1B3A31; --grid:#29493F; --line:#2E4F44;
+  --ink:#F1F4E8; --muted:#A9B9AF; --red:#FF9E8F; --hl:#5F6230;
+  --accent:#74D6A6; --accent-ink:#0E2019; --accent-soft:#214538; color-scheme:dark}
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:16px/1.6 var(--f-body)}
+.wrap{max-width:940px;margin:0 auto;padding-inline:16px;padding-block:20px 40px;display:flex;flex-direction:column;gap:18px}
+h1{font:400 clamp(1.9rem,6vw,2.6rem)/1.15 var(--f-title);margin:0;letter-spacing:.04em}
+.sub{margin:4px 0 0;color:var(--muted)}
+button,input{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+
+/* 运算选择 */
+.ops{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.ops button{display:flex;align-items:center;justify-content:center;gap:8px;min-height:52px;padding:6px 4px;
+  background:var(--card);border:2px solid var(--line);border-radius:12px;cursor:pointer;font-size:1rem}
+.ops .sym{font:600 1.6rem/1 var(--f-num);color:var(--accent)}
+.ops button[aria-selected="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.ops button[aria-selected="true"] .sym{color:var(--accent-ink)}
+
+/* 出题 */
+.ask{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 12px}
+.field{display:flex;flex-direction:column;gap:2px}
+.field label{font-size:.85rem;color:var(--muted)}
+.field input{width:5.2em;height:48px;padding:0 10px;text-align:center;font:600 1.5rem/1 var(--f-num);
+  background:var(--card);border:2px solid var(--line);border-radius:10px;font-variant-numeric:tabular-nums}
+.opsym{font:600 1.7rem/48px var(--f-num);color:var(--accent);min-width:.8em;text-align:center}
+.btn{min-height:48px;padding:0 18px;border-radius:10px;border:2px solid var(--line);background:var(--card);cursor:pointer;white-space:nowrap}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+.btn:disabled{opacity:.45;cursor:default}
+.hint{flex-basis:100%;margin:0;font-size:.9rem;color:var(--muted);min-height:1.6em}
+.hint.warn{color:var(--red)}
+
+/* 舞台 */
+.stage{display:grid;grid-template-columns:1fr;gap:18px;align-items:start}
+@media (min-width:820px){.stage{grid-template-columns:auto minmax(0,1fr);gap:28px}}
+.boardbox{display:flex;flex-direction:column;align-items:center;gap:12px;min-width:0}
+@media (min-width:820px){.boardbox{min-width:calc(var(--cell)*8)}}
+.rhyme{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;justify-content:center;gap:6px}
+.rhyme li{padding:3px 12px;border-radius:999px;border:1.5px dashed var(--line);color:var(--muted);font-size:.92rem}
+.rhyme li.on{background:var(--hl);border:1.5px solid transparent;color:var(--ink);font-weight:600}
+.rhyme li.done{background:var(--accent-soft);border:1.5px solid transparent;color:var(--ink)}
+
+.board{position:relative;width:calc(var(--cell)*(var(--cols) + 2));height:calc(var(--cell)*(var(--rows) + 1));
+  background-color:var(--paper);
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:var(--cell) var(--cell);background-position:0 calc(var(--cell)*.5);
+  border:1px solid var(--line);border-radius:6px;box-shadow:0 2px 0 var(--line);overflow:hidden}
+.board > *{position:absolute;left:calc(var(--cell)*(var(--c) + 1));top:calc(var(--cell)*(var(--r) + .5))}
+.d,.hi,.m{width:var(--cell);height:var(--cell)}
+.hi{background:var(--hl);border-radius:8px;transform:scale(.88)}
+.d{display:grid;place-items:center;font:600 calc(var(--cell)*.7)/1 var(--f-num);font-variant-numeric:tabular-nums;z-index:1}
+.d.op{color:var(--accent)}
+.d.win{color:var(--accent)}
+.m{z-index:2;pointer-events:none;color:var(--red);font:600 calc(var(--cell)*.34)/1 var(--f-num)}
+.m.carry{display:flex;align-items:flex-end;justify-content:flex-end;padding:0 calc(var(--cell)*.04) calc(var(--cell)*.03) 0}
+.m.dot::before{content:"";position:absolute;left:50%;top:calc(var(--cell)*.03);width:calc(var(--cell)*.17);height:calc(var(--cell)*.17);
+  margin-left:calc(var(--cell)*-.085);border-radius:50%;background:var(--red)}
+.ln{height:3px;margin-top:-1.5px;border-radius:2px;background:var(--ink);z-index:1;
+  width:calc(var(--cell)*var(--w));transform-origin:left center}
+.ln.under{top:calc(var(--cell)*(var(--r) + 1.5))}
+.brk{width:calc(var(--cell)*.3);height:var(--cell);margin-left:calc(var(--cell)*-.12);color:var(--ink);z-index:1}
+.brk svg{display:block;width:100%;height:100%;overflow:visible}
+
+@keyframes pop{0%{opacity:0;transform:scale(.3)}70%{opacity:1;transform:scale(1.18)}100%{opacity:1;transform:scale(1)}}
+@keyframes draw{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@keyframes drop{0%{opacity:.25;transform:translateY(calc(var(--cell)*var(--dy)))}100%{opacity:1;transform:none}}
+@keyframes cheer{0%,100%{transform:none}40%{transform:translateY(-22%) scale(1.12)}}
+@keyframes glow{from{opacity:0}to{opacity:1}}
+.new{animation:pop .45s cubic-bezier(.3,1.4,.5,1) both;animation-delay:var(--dl,0ms)}
+.ln.new{animation:draw .35s ease-out both;animation-delay:var(--dl,0ms)}
+.d.new.drop{animation:drop .7s cubic-bezier(.3,.9,.4,1) both;animation-delay:var(--dl,0ms)}
+.d.win{animation:cheer .6s ease-in-out both;animation-delay:var(--dl,0ms)}
+.hi{animation:glow .25s ease-out both}
+@media (prefers-reduced-motion:reduce){.new,.ln.new,.d.new.drop,.d.win,.hi{animation:none}}
+
+/* 讲解和按钮 */
+.side{display:flex;flex-direction:column;gap:14px;min-width:0}
+.count{margin:0;font-size:.9rem;color:var(--muted);letter-spacing:.06em}
+.say{margin:0;min-height:6.6em;padding:16px 18px;background:var(--card);border:1px solid var(--line);border-radius:14px;
+  font-size:clamp(1.08rem,3.6vw,1.28rem);line-height:1.75}
+.say b{font:600 1.12em/1 var(--f-num);color:var(--accent);padding:0 .1em}
+.say u{text-decoration:none;font-weight:600;background:var(--hl);border-radius:6px;padding:1px 7px;margin-right:2px}
+.say em{font-style:normal;font-weight:600;color:var(--red)}
+.say .eq{display:block;margin-top:4px;font:600 1.45em/1.4 var(--f-num);color:var(--accent)}
+.bar{height:8px;border-radius:4px;background:var(--accent-soft);overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--accent);border-radius:4px;transition:width .3s}
+.ctrl{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.ctrl .btn{padding:0 6px}
+.speed{display:flex;align-items:center;gap:10px;flex-wrap:wrap;color:var(--muted);font-size:.92rem}
+.seg{display:inline-flex;border:2px solid var(--line);border-radius:10px;overflow:hidden;background:var(--card)}
+.seg button{min-width:52px;min-height:38px;border:0;background:none;cursor:pointer;color:var(--ink)}
+.seg button[aria-pressed="true"]{background:var(--accent-soft);font-weight:600}
+.keys{margin:0;font-size:.85rem;color:var(--muted)}
+@media (hover:none){.keys{display:none}}
+/* 手机：讲解在上，竖式在中间，按钮一直停在屏幕底部 */
+@media (max-width:819px){
+  .stage{gap:12px}
+  .side{display:contents}
+  .count{order:1}.say{order:2;min-height:8em}.boardbox{order:3}.bar{order:4}.ctrl{order:5}.speed{order:6}.keys{order:7}
+  .ctrl{position:sticky;bottom:0;z-index:5;background:var(--bg);padding-block:8px calc(8px + env(safe-area-inset-bottom,0px))}
+}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>竖式小课堂</h1>
+    <p class="sub">选一种运算，写两个数，一步一步看竖式是怎么算出来的。</p>
+  </header>
+
+  <nav class="ops" role="tablist" aria-label="选择运算">
+    <button type="button" role="tab" id="op-add" data-op="add" aria-selected="true"><span class="sym">+</span>加法</button>
+    <button type="button" role="tab" id="op-sub" data-op="sub" aria-selected="false"><span class="sym">−</span>减法</button>
+    <button type="button" role="tab" id="op-mul" data-op="mul" aria-selected="false"><span class="sym">×</span>乘法</button>
+    <button type="button" role="tab" id="op-div" data-op="div" aria-selected="false"><span class="sym">÷</span>除法</button>
+  </nav>
+
+  <form class="ask" id="ask" novalidate>
+    <div class="field"><label for="numA" id="labA">加数</label>
+      <input id="numA" type="text" inputmode="numeric" autocomplete="off" maxlength="3" value="347"></div>
+    <span class="opsym" id="opSym" aria-hidden="true">+</span>
+    <div class="field"><label for="numB" id="labB">加数</label>
+      <input id="numB" type="text" inputmode="numeric" autocomplete="off" maxlength="3" value="285"></div>
+    <button type="submit" class="btn primary" id="go">列竖式</button>
+    <button type="button" class="btn" id="rand">换一题</button>
+    <p class="hint" id="hint" role="status"></p>
+  </form>
+
+  <main class="stage">
+    <section class="boardbox" aria-label="竖式">
+      <ol class="rhyme" id="rhyme" aria-label="口诀"></ol>
+      <div class="board" id="board" aria-hidden="true"></div>
+    </section>
+    <section class="side" aria-label="讲解">
+      <p class="count" id="count"></p>
+      <p class="say" id="say" aria-live="polite"></p>
+      <div class="bar" aria-hidden="true"><i id="barFill"></i></div>
+      <div class="ctrl">
+        <button type="button" class="btn" id="reset">从头看</button>
+        <button type="button" class="btn" id="prev">上一步</button>
+        <button type="button" class="btn primary" id="play">播放</button>
+        <button type="button" class="btn" id="next">下一步</button>
+      </div>
+      <div class="speed"><span id="speedLab">播放速度</span>
+        <div class="seg" role="group" aria-labelledby="speedLab">
+          <button type="button" id="sp-slow" data-ms="4200" aria-pressed="false">慢</button>
+          <button type="button" id="sp-mid" data-ms="2800" aria-pressed="true">中</button>
+          <button type="button" id="sp-fast" data-ms="1600" aria-pressed="false">快</button>
+        </div>
+      </div>
+      <p class="keys">键盘：← 上一步，→ 下一步，空格 播放或暂停。</p>
+    </section>
+  </main>
+</div>
+<script>
+/* ---------- 每种运算：把一道题拆成一步一步 ---------- */
+const PL = ['个', '十', '百', '千', '万'];
+const B = n => `<b>${n}</b>`;
+const U = s => `<u>${s}</u>`;
+const digitsAt = (str, r, rightCol, extra) =>
+  [...str].map((ch, i) => Object.assign({ r, c: rightCol - (str.length - 1 - i), t: ch }, extra || {}));
+const rowCells = (steps, r) => {
+  const out = [];
+  steps.forEach(s => (s.add || []).forEach(a => { if (a.r === r && !a.cls) out.push([a.r, a.c]); }));
+  return out;
+};
+
+function genAdd(a, b) {
+  const A = String(a), Bs = String(b), S = String(a + b);
+  const n = Math.max(A.length, Bs.length);
+  const cols = Math.max(n + 1, S.length), col = p => cols - 1 - p;
+  const steps = [{
+    ph: [0],
+    say: `把 ${B(a)} 和 ${B(b)} 写成竖式：<em>相同数位对齐</em>，个位对个位，十位对十位。`,
+    add: [...digitsAt(A, 0, col(0)), { r: 1, c: 0, t: '+', cls: 'op' }, ...digitsAt(Bs, 1, col(0))],
+    lines: [{ r: 1, c1: 0, c2: cols - 1 }]
+  }];
+  let carry = 0;
+  for (let p = 0; p < n; p++) {
+    const x = p < A.length ? +A[A.length - 1 - p] : null;
+    const y = p < Bs.length ? +Bs[Bs.length - 1 - p] : null;
+    const t = (x || 0) + (y || 0) + carry, d = t % 10, out = Math.floor(t / 10);
+    const name = PL[p] + '位', up = PL[p + 1] + '位';
+    let say = U(name);
+    if (x !== null && y !== null) {
+      say += carry ? `${x} + ${y} = ${x + y}，再加上进上来的 <em>1</em>，得 ${B(t)}。` : `${x} + ${y} = ${B(t)}。`;
+    } else {
+      const only = x !== null ? x : y;
+      say += carry ? `只有 ${only}，加上进上来的 <em>1</em>，得 ${B(t)}。` : `只有 ${only}，直接落下来。`;
+    }
+    const st = { ph: out ? [1, 2] : [1], hi: [], add: [{ r: 2, c: col(p), t: d }], marks: [] };
+    if (x !== null) st.hi.push([0, col(p)]);
+    if (y !== null) st.hi.push([1, col(p)]);
+    if (out && p === n - 1) {
+      say += `<em>满十进一</em>：${name}写 ${B(d)}，${up}写 ${B(1)}。`;
+      st.add.push({ r: 2, c: col(p + 1), t: 1 });
+    } else if (out) {
+      say += `<em>满十进一</em>：${name}写 ${B(d)}，在${up}的横线上记一个小 <em>1</em>。`;
+      st.marks.push({ r: 1, c: col(p + 1), t: 1, kind: 'carry' });
+    } else {
+      say += `在${name}写 ${B(d)}。`;
+    }
+    st.say = say; steps.push(st); carry = out;
+  }
+  steps.push({ done: true, ans: rowCells(steps, 2), say: `算完啦！<span class="eq">${a} + ${b} = ${a + b}</span>` });
+  return { steps, cols, rhyme: ['数位对齐', '从个位加起', '满十进一'] };
+}
+
+function genSub(a, b) {
+  const A = String(a), Bs = String(b), D = String(a - b);
+  const cols = A.length + 1, col = p => cols - 1 - p;
+  const steps = [{
+    ph: [0],
+    say: `把 ${B(a)} 和 ${B(b)} 写成竖式：<em>相同数位对齐</em>，个位对个位，十位对十位。`,
+    add: [...digitsAt(A, 0, col(0)), { r: 1, c: 0, t: '−', cls: 'op' }, ...digitsAt(Bs, 1, col(0))],
+    lines: [{ r: 1, c1: 0, c2: cols - 1 }]
+  }];
+  let borrow = 0;
+  for (let p = 0; p < A.length; p++) {
+    const x = +A[A.length - 1 - p];
+    const y = p < Bs.length ? +Bs[Bs.length - 1 - p] : null, yy = y || 0;
+    const name = PL[p] + '位', up = PL[p + 1] + '位';
+    let top = x - borrow, out = 0, say = U(name);
+    const st = { hi: [[0, col(p)]], add: [], marks: [] };
+    if (y !== null) st.hi.push([1, col(p)]);
+    if (borrow && x === 0) {
+      say += `0 没有 1 可以借出去，先从${up}借 1 当 <em>10</em>，借走 1 后还剩 ${B(9)}。`;
+      top = 9; out = 1;
+    } else if (borrow) {
+      say += `${x} 被借走了 1，还剩 ${B(top)}。`;
+    }
+    if (!out && top < yy) {
+      say += `${top} − ${yy} 不够减，从${up}借 1 当 <em>10</em>，${top} 变成 ${top + 10}。`;
+      top += 10; out = 1;
+    }
+    if (out) st.marks.push({ r: 0, c: col(p + 1), kind: 'dot' });
+    const d = top - yy;
+    if (y !== null) say += `${top} − ${yy} = ${B(d)}。`;
+    else if (!borrow) say += `下面没有数要减，${x} 直接落下来。`;
+    if (p >= D.length) say += `得数最前面的 0 不用写。`;
+    else { st.add.push({ r: 2, c: col(p), t: d }); if (y !== null || borrow) say += `在${name}写 ${B(d)}。`; }
+    st.ph = out ? [1, 2] : [1];
+    st.say = say; steps.push(st); borrow = out;
+  }
+  steps.push({ done: true, ans: rowCells(steps, 2), say: `算完啦！<span class="eq">${a} − ${b} = ${a - b}</span>` });
+  return { steps, cols, rhyme: ['数位对齐', '从个位减起', '不够减，退一当十'] };
+}
+
+function genMul(a, b) {
+  const A = String(a), Bs = String(b), P = String(a * b);
+  const two = Bs.length === 2;
+  const ms = two ? [+Bs[1], +Bs[0]] : [+Bs[0]];
+  const parts = ms.map(m => String(a * m));
+  const cols = Math.max(P.length, Math.max(A.length, Bs.length) + 1), col = p => cols - 1 - p;
+  const steps = [{
+    ph: [0],
+    say: `把 ${B(a)} 写在上面，${B(b)} 写在下面，<em>末位对齐</em>。`,
+    add: [...digitsAt(A, 0, col(0)), { r: 1, c: 0, t: '×', cls: 'op' }, ...digitsAt(Bs, 1, col(0))],
+    lines: [{ r: 1, c1: 0, c2: cols - 1 }]
+  }];
+  ms.forEach((m, k) => {
+    const row = 2 + k, ph = [1 + k];
+    const who = two ? `${b} ${PL[k]}位上的 ${B(m)}` : B(m);
+    steps.push({
+      ph, hi: [[1, col(k)]], clearMarks: true,
+      say: (k === 0 ? (two ? '先' : '') : '再') + `用 ${who} 去乘 ${a} 的每一位，从个位乘起。` +
+        (k === 1 ? `${m} 在十位，表示 ${m} 个十，所以积的末位要和<em>十位</em>对齐。` : '')
+    });
+    if (m === 0) {
+      steps.push({ ph, hi: [[1, col(k)]], add: [{ r: row, c: col(k), t: 0 }], say: `0 乘任何数都得 0，这一行只写一个 ${B(0)}。` });
+      return;
+    }
+    let carry = 0;
+    for (let p = 0; p < A.length; p++) {
+      const x = +A[A.length - 1 - p], t = m * x + carry, d = t % 10, out = Math.floor(t / 10);
+      const name = PL[p + k] + '位';
+      let say = `${m} × ${x} = ${m * x}` + (carry ? `，加上进位的 <em>${carry}</em>，得 ${B(t)}。` : '。');
+      const st = { ph, hi: [[0, col(p)], [1, col(k)]], add: [], marks: [] };
+      if (p === A.length - 1) {
+        st.add = digitsAt(String(t), row, col(p + k));
+        say += t >= 10 ? `已经乘到最高位，把 ${B(t)} 整个写下来。` : `在${name}写 ${B(t)}。`;
+      } else {
+        st.add = [{ r: row, c: col(p + k), t: d }];
+        if (out) {
+          say += `在${name}写 ${B(d)}，向前一位进 <em>${out}</em>，记个小 <em>${out}</em>。`;
+          st.marks.push({ r: 0, c: col(p + 1), t: out, kind: 'carry' });
+        } else say += `在${name}写 ${B(d)}。`;
+      }
+      st.say = say; steps.push(st); carry = out;
+    }
+  });
+  if (two) {
+    steps.push({ ph: [3], clearMarks: true, lines: [{ r: 3, c1: 0, c2: cols - 1 }], say: `两次都乘完了。画一条横线，把两次乘得的数<em>加起来</em>。` });
+    const p1 = parts[0], p2 = parts[1];
+    let carry = 0;
+    for (let p = 0; p < P.length; p++) {
+      const x = p < p1.length ? +p1[p1.length - 1 - p] : null;
+      const y = p >= 1 && p - 1 < p2.length ? +p2[p2.length - p] : null;
+      const t = (x || 0) + (y || 0) + carry, d = t % 10, out = Math.floor(t / 10);
+      const name = PL[p] + '位';
+      let say = U(name);
+      if (x !== null && y !== null) say += carry ? `${x} + ${y} = ${x + y}，加上进上来的 <em>1</em>，得 ${B(t)}。` : `${x} + ${y} = ${B(t)}。`;
+      else if (x !== null || y !== null) { const o = x !== null ? x : y; say += carry ? `只有 ${o}，加上进上来的 <em>1</em>，得 ${B(t)}。` : `只有 ${o}，直接落下来。`; }
+      else say += `只有进上来的 <em>1</em>。`;
+      const st = { ph: [3], hi: [], add: [{ r: 4, c: col(p), t: d }], marks: [] };
+      if (x !== null) st.hi.push([2, col(p)]);
+      if (y !== null) st.hi.push([3, col(p)]);
+      if (out) { say += `写 ${B(d)}，向前一位进 <em>1</em>。`; st.marks.push({ r: 3, c: col(p + 1), t: 1, kind: 'carry' }); }
+      else say += `写 ${B(d)}。`;
+      st.say = say; steps.push(st); carry = out;
+    }
+  }
+  steps.push({ done: true, ans: rowCells(steps, two ? 4 : 2), say: `算完啦！<span class="eq">${a} × ${b} = ${a * b}</span>` });
+  return { steps, cols, rhyme: two ? ['末位对齐', '先乘个位', '再乘十位', '两积相加'] : ['末位对齐', '从个位乘起', '满几十进几'] };
+}
+
+function genDiv(a, d) {
+  const A = String(a), Ds = String(d), n = A.length, dl = Ds.length;
+  const q = Math.floor(a / d), rem = a % d;
+  const cols = dl + n, col = i => dl + i, place = i => PL[n - 1 - i] + '位';
+  const steps = [{
+    ph: [],
+    say: `除法竖式长得不一样：除数 ${B(d)} 写在“厂”字外面，被除数 ${B(a)} 写在里面，商要写在最上面。`,
+    add: [...digitsAt(Ds, 1, dl - 1), ...digitsAt(A, 1, col(n - 1))],
+    brk: { r: 1, c1: col(0), c2: col(n - 1) }
+  }];
+  let i = 0, cur = +A[0];
+  while (cur < d && i < n - 1) { i++; cur = cur * 10 + +A[i]; }
+  let wr = 1, vis = []; for (let j = 0; j <= i; j++) vis.push(col(j));
+  const first = +A[0];
+  steps.push({
+    ph: [], hi: vis.map(c => [1, c]),
+    say: `除法要从<em>最高位</em>除起。` + (cur < d ? `可是 ${a} 比 ${d} 小，一个 ${d} 也分不出来。`
+      : i === 0 ? `先看${place(0)}上的 ${B(first)}：${first} ${first > d ? '比 ' + d + ' 大' : '和 ' + d + ' 一样大'}，够除。`
+      : `${A.slice(0, i)} 比 ${d} 小，不够除，就看前 ${i + 1} 位 ${B(cur)}。`)
+  });
+  for (;;) {
+    const qd = Math.floor(cur / d), prod = qd * d, r = cur - prod;
+    const hiCur = vis.map(c => [wr, c]);
+    if (qd === 0) {
+      steps.push({ ph: [0], hi: hiCur, add: [{ r: 0, c: col(i), t: 0 }], say: `${U('商')}${cur} 比 ${d} 小，不够商 1，在${place(i)}上写 ${B(0)} <em>占位</em>。` });
+    } else {
+      steps.push({
+        ph: [0], hi: hiCur, add: [{ r: 0, c: col(i), t: qd }],
+        say: `${U('商')}${cur} 里面最多有几个 ${d}？${d} × ${qd} = ${prod}，` +
+          (r === 0 ? `正好。` : `再多一个 ${d} × ${qd + 1} = ${d * (qd + 1)} 就超过了。`) + `所以在${place(i)}上商 ${B(qd)}。`
+      });
+      steps.push({
+        ph: [1], hi: [[0, col(i)], ...digitsAt(Ds, 1, dl - 1).map(x => [x.r, x.c])],
+        add: digitsAt(String(prod), wr + 1, col(i)),
+        say: `${U('乘')}${qd} × ${d} = ${B(prod)}，写在 ${cur} 的下面，末位对齐。`
+      });
+      const len = Math.max(String(cur).length, String(prod).length);
+      const st = {
+        ph: [2], hi: [...hiCur, ...digitsAt(String(prod), wr + 1, col(i)).map(x => [x.r, x.c])],
+        lines: [{ r: wr + 1, c1: col(i) - len + 1, c2: col(i) }], add: []
+      };
+      let say = `${U('减')}${cur} − ${prod} = ${B(r)}。`;
+      if (r === 0 && i < n - 1) { say += `正好减完，这里先空着。`; vis = []; }
+      else {
+        st.add = digitsAt(String(r), wr + 2, col(i)); vis = st.add.map(x => x.c);
+        say += i === n - 1 ? (r ? `没有数可以落了，${r} 就是<em>余数</em>。` : `正好除完，没有余数。`) : `余下的 ${r} 比 ${d} 小，对了。`;
+      }
+      st.say = say; steps.push(st); wr += 2;
+    }
+    if (i === n - 1) break;
+    i++;
+    const nd = +A[i], left = qd === 0 ? cur : r;
+    cur = left * 10 + nd;
+    steps.push({
+      ph: [3], hi: [[1, col(i)], [wr, col(i)]],
+      add: wr === 1 ? [] : [{ r: wr, c: col(i), t: nd, from: 1 }],
+      say: `${U('落')}把${place(i)}上的 ${nd} 落下来` + (left > 0 ? `，和 ${left} 合成 ${B(cur)}。` : `，接着除 ${B(cur)}。`)
+    });
+    vis = wr === 1 ? [...vis, col(i)] : (left > 0 || vis.length ? [...vis, col(i)] : [col(i)]);
+  }
+  const ans = rowCells(steps, 0);
+  steps.push({
+    done: true, ans,
+    say: `算完啦！<span class="eq">${a} ÷ ${d} = ${q}${rem ? ' …… ' + rem : ''}</span>` + (rem ? `余数 ${rem} 比除数 ${d} 小。` : '')
+  });
+  return { steps, cols, rhyme: ['商', '乘', '减', '落'] };
+}
+
+const GEN = { add: genAdd, sub: genSub, mul: genMul, div: genDiv };
+
+/* ---------- 页面 ---------- */
+const OPS = {
+  add: { sym: '+', la: '加数', lb: '加数', maxA: 999, maxB: 999, minA: 0, minB: 0, val: [347, 285], tip: '两个加数都可以写到 999。' },
+  sub: { sym: '−', la: '被减数', lb: '减数', maxA: 999, maxB: 999, minA: 0, minB: 0, val: [502, 168], tip: '两个数都可以写到 999，被减数要大一些。' },
+  mul: { sym: '×', la: '乘数（最多三位）', lb: '乘数（最多两位）', maxA: 999, maxB: 99, minA: 1, minB: 1, val: [126, 34], tip: '第一个乘数最大 999，第二个乘数最大 99。' },
+  div: { sym: '÷', la: '被除数', lb: '除数', maxA: 999, maxB: 99, minA: 1, minB: 1, val: [745, 6], tip: '被除数最大 999，除数最大 99，除数不能是 0。' }
+};
+const $ = id => document.getElementById(id);
+const S = { op: 'add', steps: [], cols: 4, rows: 3, rhyme: [], k: 0, playing: false, timer: 0, ms: 2800 };
+const rnd = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo + 1));
+
+function mk(cls, vars) {
+  const e = document.createElement(cls === 'brk' ? 'div' : 'span');
+  e.className = cls;
+  for (const k in vars) e.style.setProperty('--' + k, vars[k]);
+  return e;
+}
+
+function render(animate) {
+  const st = S.steps[S.k], bd = $('board'), frag = document.createDocumentFragment();
+  bd.style.setProperty('--cols', S.cols); bd.style.setProperty('--rows', S.rows);
+  (st.hi || []).forEach(([r, c]) => frag.append(mk('hi', { r, c })));
+  const cells = new Map(); let marks = [], t = 0;
+  S.steps.slice(0, S.k + 1).forEach((s, i) => {
+    const fresh = animate && i === S.k;
+    const gap = (s.add || []).length > 4 ? 60 : 240;
+    const tag = e => { if (fresh) { e.classList.add('new'); e.style.setProperty('--dl', t + 'ms'); t += gap; } return e; };
+    if (s.clearMarks) marks = [];
+    if (s.brk) {
+      const b = mk('brk', { r: s.brk.r, c: s.brk.c1 });
+      b.innerHTML = '<svg viewBox="0 0 12 40" preserveAspectRatio="none"><path d="M5 0 Q14 20 2 40" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" vector-effect="non-scaling-stroke"/></svg>';
+      frag.append(b, tag(mk('ln', { r: s.brk.r, c: s.brk.c1, w: s.brk.c2 - s.brk.c1 + 1 })));
+    }
+    (s.lines || []).forEach(l => frag.append(tag(mk('ln under', { r: l.r, c: l.c1, w: l.c2 - l.c1 + 1 }))));
+    (s.add || []).forEach(a => {
+      const e = mk('d' + (a.cls ? ' ' + a.cls : ''), { r: a.r, c: a.c });
+      e.textContent = a.t;
+      if (fresh && a.from !== undefined) { e.classList.add('drop'); e.style.setProperty('--dy', a.from - a.r); }
+      cells.set(a.r + ',' + a.c, e); frag.append(tag(e));
+    });
+    (s.marks || []).forEach(m => marks.push({ m, fresh, dl: fresh ? (t += gap) - gap : 0 }));
+  });
+  marks.forEach(({ m, fresh, dl }) => {
+    const e = mk('m ' + m.kind, { r: m.r, c: m.c });
+    if (m.t !== undefined) e.textContent = m.t;
+    if (fresh) { e.classList.add('new'); e.style.setProperty('--dl', dl + 'ms'); }
+    frag.append(e);
+  });
+  if (st.done) (st.ans || []).forEach(([r, c], i) => {
+    const e = cells.get(r + ',' + c);
+    if (e) { e.classList.add('win'); e.style.setProperty('--dl', (animate ? i * 90 : 0) + 'ms'); }
+  });
+  bd.replaceChildren(frag);
+
+  $('say').innerHTML = st.say;
+  const n = S.steps.length;
+  $('count').textContent = `第 ${S.k + 1} 步 · 共 ${n} 步`;
+  $('barFill').style.width = (n > 1 ? S.k / (n - 1) * 100 : 100) + '%';
+  $('prev').disabled = $('reset').disabled = S.k === 0;
+  $('next').disabled = S.k === n - 1;
+  $('play').textContent = S.playing ? '暂停' : (S.k === n - 1 ? '再看一遍' : '播放');
+  const lis = $('rhyme').children;
+  S.rhyme.forEach((_, i) => { lis[i].className = st.done ? 'done' : (st.ph || []).includes(i) ? 'on' : ''; });
+}
+
+function stop() { S.playing = false; clearTimeout(S.timer); }
+function tick() {
+  clearTimeout(S.timer);
+  if (!S.playing) return;
+  S.timer = setTimeout(() => {
+    if (S.k < S.steps.length - 1) { S.k++; if (S.k === S.steps.length - 1) S.playing = false; render(true); tick(); }
+    else { S.playing = false; render(false); }
+  }, S.ms);
+}
+function go(k) { stop(); S.k = Math.max(0, Math.min(S.steps.length - 1, k)); render(true); }
+function togglePlay() {
+  if (S.playing) { stop(); render(false); return; }
+  if (S.k === S.steps.length - 1) S.k = 0; else S.k++;
+  S.playing = S.k < S.steps.length - 1;
+  render(true); tick();
+}
+
+function build(a, b) {
+  stop();
+  const g = GEN[S.op](a, b);
+  S.steps = g.steps; S.cols = g.cols; S.rhyme = g.rhyme; S.k = 0;
+  S.rows = 1 + Math.max(...g.steps.flatMap(s => (s.add || []).map(x => x.r)));
+  OPS[S.op].val = [a, b];
+  $('rhyme').replaceChildren(...g.rhyme.map(t => { const li = document.createElement('li'); li.textContent = t; return li; }));
+  render(true);
+}
+
+function setHint(msg, warn) { const h = $('hint'); h.textContent = msg; h.classList.toggle('warn', !!warn); }
+
+function submit() {
+  const o = OPS[S.op];
+  const ra = $('numA').value.trim(), rb = $('numB').value.trim();
+  if (!/^\d+$/.test(ra) || !/^\d+$/.test(rb)) { setHint('两个格子里都要写数字哦，只能写 0 到 9 组成的整数。', true); return; }
+  let a = +ra, b = +rb;
+  if (a > o.maxA || a < o.minA) { setHint(`第一个数要写 ${o.minA} 到 ${o.maxA} 之间的数。`, true); return; }
+  if (b > o.maxB || b < o.minB) { setHint(S.op === 'div' && b === 0 ? '除数不能是 0，换一个数试试。' : `第二个数要写 ${o.minB} 到 ${o.maxB} 之间的数。`, true); return; }
+  let note = o.tip;
+  if (S.op === 'sub' && a < b) { [a, b] = [b, a]; note = '被减数要比减数大，我帮你把两个数换了位置。'; }
+  $('numA').value = a; $('numB').value = b;
+  setHint(note, false);
+  build(a, b);
+}
+
+function randomPair() {
+  if (S.op === 'add') return [rnd(105, 899), rnd(27, 899)];
+  if (S.op === 'sub') { const a = rnd(200, 999); return [a, rnd(18, a - 5)]; }
+  if (S.op === 'mul') return Math.random() < .4 ? [rnd(112, 999), rnd(2, 9)] : [rnd(12, 999), rnd(11, 99)];
+  const d = Math.random() < .5 ? rnd(2, 9) : rnd(11, 99);
+  return [rnd(Math.max(d, 60), 999), d];
+}
+
+function setOp(op) {
+  S.op = op; const o = OPS[op];
+  document.querySelectorAll('.ops button').forEach(b => b.setAttribute('aria-selected', b.dataset.op === op));
+  $('labA').textContent = o.la; $('labB').textContent = o.lb; $('opSym').textContent = o.sym;
+  $('numA').maxLength = String(o.maxA).length; $('numB').maxLength = String(o.maxB).length;
+  $('numA').value = o.val[0]; $('numB').value = o.val[1];
+  setHint(o.tip, false);
+  build(o.val[0], o.val[1]);
+}
+
+document.querySelector('.ops').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setOp(b.dataset.op); });
+$('ask').addEventListener('submit', e => { e.preventDefault(); submit(); });
+$('rand').addEventListener('click', () => { const [a, b] = randomPair(); $('numA').value = a; $('numB').value = b; submit(); });
+$('prev').addEventListener('click', () => go(S.k - 1));
+$('next').addEventListener('click', () => go(S.k + 1));
+$('reset').addEventListener('click', () => go(0));
+$('play').addEventListener('click', togglePlay);
+document.querySelector('.seg').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  S.ms = +b.dataset.ms;
+  document.querySelectorAll('.seg button').forEach(x => x.setAttribute('aria-pressed', x === b));
+  try { localStorage.setItem('vm-speed', b.id); } catch (_) {}
+  if (S.playing) tick();
+});
+document.addEventListener('keydown', e => {
+  if (e.target.closest('input') || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === ' ' && e.target.closest('button')) return;
+  if (e.key === 'ArrowRight') { go(S.k + 1); e.preventDefault(); }
+  else if (e.key === 'ArrowLeft') { go(S.k - 1); e.preventDefault(); }
+  else if (e.key === ' ') { togglePlay(); e.preventDefault(); }
+});
+
+try {
+  const saved = localStorage.getItem('vm-speed'), b = saved && $(saved);
+  if (b && b.dataset.ms) { S.ms = +b.dataset.ms; document.querySelectorAll('.seg button').forEach(x => x.setAttribute('aria-pressed', x === b)); }
+} catch (_) {}
+setOp('add');
+</script>
+
+</body></html>
