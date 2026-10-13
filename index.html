@@ -1,3 +1,129 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Web 工具与演示</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: #f5f7fa;
+    color: #2c3e50;
+    min-height: 100vh;
+  }
+  header {
+    background: linear-gradient(135deg, #4a6fa5, #3b5998);
+    color: #fff;
+    padding: 40px 24px;
+    text-align: center;
+  }
+  header h1 { font-size: 28px; letter-spacing: 2px; }
+  header p { margin-top: 8px; opacity: .85; font-size: 14px; }
+  main { max-width: 1000px; margin: 0 auto; padding: 32px 20px 48px; }
+  section { margin-bottom: 36px; }
+  section h2 {
+    font-size: 18px;
+    border-left: 4px solid #4a6fa5;
+    padding-left: 10px;
+    margin-bottom: 16px;
+  }
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 14px;
+  }
+  a.card {
+    display: block;
+    background: #fff;
+    border: 1px solid #e3e8ef;
+    border-radius: 8px;
+    padding: 16px 18px;
+    text-decoration: none;
+    color: inherit;
+    transition: box-shadow .15s ease, transform .15s ease;
+  }
+  a.card:hover {
+    box-shadow: 0 4px 14px rgba(74, 111, 165, .18);
+    transform: translateY(-2px);
+  }
+  .card .name { font-size: 15px; font-weight: 600; color: #34507a; }
+  .card .desc { margin-top: 6px; font-size: 13px; color: #7a8794; line-height: 1.5; }
+</style>
+</head>
 <body>
-none
+<header>
+  <h1>Web 工具与演示</h1>
+  <p>在线小工具 · WebGPU 演示 · 技术文章</p>
+</header>
+<main>
+  <section>
+    <h2>在线工具</h2>
+    <div class="cards">
+      <a class="card" href="geminiweb/">
+        <div class="name">Gemini Chat</div>
+        <div class="desc">Gemini 聊天网页应用</div>
+      </a>
+      <a class="card" href="blinkyoureyeskimi/">
+        <div class="name">眨眼提醒助手</div>
+        <div class="desc">定时提醒眨眼，缓解用眼疲劳</div>
+      </a>
+      <a class="card" href="videoencdec/">
+        <div class="name">Video Encoder/Decoder</div>
+        <div class="desc">浏览器端视频编码 / 解码工具</div>
+      </a>
+      <a class="card" href="竖式小课堂.html">
+        <div class="name">竖式小课堂</div>
+        <div class="desc">小学竖式计算演示教学</div>
+      </a>
+      <a class="card" href="pastecontent.html">
+        <div class="name">Paste → Print</div>
+        <div class="desc">粘贴内容并打印（图片安全）</div>
+      </a>
+      <a class="card" href="vertical_image_display.html">
+        <div class="name">拖放图片显示</div>
+        <div class="desc">拖放图片显示并保存截图</div>
+      </a>
+    </div>
+  </section>
+  <section>
+    <h2>WebGPU 演示</h2>
+    <div class="cards">
+      <a class="card" href="webgpu-capabilities.html">
+        <div class="name">WebGPU Capabilities</div>
+        <div class="desc">检测并展示当前浏览器的 WebGPU 能力</div>
+      </a>
+      <a class="card" href="webgputest/">
+        <div class="name">WebGPU GPU Benchmark</div>
+        <div class="desc">GPU 性能基准测试</div>
+      </a>
+      <a class="card" href="webgpuwatersurface/">
+        <div class="name">WebGPU Water Ripple</div>
+        <div class="desc">水面波纹模拟</div>
+      </a>
+      <a class="card" href="webgputribin.html">
+        <div class="name">WebGPU Random Triangles</div>
+        <div class="desc">全屏随机三角形渲染</div>
+      </a>
+    </div>
+  </section>
+  <section>
+    <h2>技术文章</h2>
+    <div class="cards">
+      <a class="card" href="art-gc.html">
+        <div class="name">ART 虚拟机的 GC 是如何工作的</div>
+        <div class="desc">Android ART 垃圾回收机制图文解析</div>
+      </a>
+      <a class="card" href="javaparallelscavenge.html">
+        <div class="name">Java Parallel Scavenge GC OldGen 算法解析</div>
+        <div class="desc">Parallel Scavenge 老年代回收算法图解</div>
+      </a>
+      <a class="card" href="chrominspector_node_snapshot.html">
+        <div class="name">Chromium Inspector 如何实现 DOM 节点快照</div>
+        <div class="desc">How Chromium Inspector Implements DOM Node Snapshotting</div>
+      </a>
+    </div>
+  </section>
+</main>
 </body>
+</html>
