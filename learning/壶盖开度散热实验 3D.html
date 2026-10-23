@@ -1,0 +1,1788 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>壶盖开度散热实验 3D</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a lab bench — 3D viewport left, instrument column right, results strip and notes below. */
+:root {
+  --bg: #eceff2; --surface: #ffffff; --surface2: #f4f6f8; --line: #d3dae1;
+  --ink: #16202a; --muted: #5e6c79;
+  --hot: #dd4f1c; --hot2: #f59a3a; --cold: #2a7ccf;
+  --steel: #8c99a5; --steel-dk: #566470; --water: #3c8fd6; --wood: #c9ab83; --scene: #dfe5ea;
+  --font-body: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #10161c; --surface: #19212a; --surface2: #1f2932; --line: #2b3742;
+    --ink: #e6ebf0; --muted: #94a2b0; --hot: #ff6a2f; --hot2: #ffb24a; --cold: #5db0ff;
+    --steel: #a2aeb9; --steel-dk: #6c7a87; --water: #3a86c8; --wood: #5a4733; --scene: #0b1116;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #10161c; --surface: #19212a; --surface2: #1f2932; --line: #2b3742;
+  --ink: #e6ebf0; --muted: #94a2b0; --hot: #ff6a2f; --hot2: #ffb24a; --cold: #5db0ff;
+  --steel: #a2aeb9; --steel-dk: #6c7a87; --water: #3a86c8; --wood: #5a4733; --scene: #0b1116;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-body); font-size: 15px; line-height: 1.6;
+  padding-block: 28px 56px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 1120px; margin: 0 auto; display: grid; gap: 22px; }
+header { display: grid; gap: 6px; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+h1 { font-size: clamp(24px, 3.4vw, 34px); font-weight: 700; margin: 0; line-height: 1.25; text-wrap: balance; letter-spacing: -0.01em; }
+.lede { color: var(--muted); max-width: 64ch; margin: 0; }
+
+.bench { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 18px; align-items: start; }
+@media (max-width: 860px) { .bench { grid-template-columns: minmax(0, 1fr); } }
+.stage { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; min-width: 0; position: relative; }
+.stage canvas { display: block; width: 100%; height: auto; max-width: 100%; background: var(--scene); touch-action: none; cursor: grab; }
+.stage canvas:active { cursor: grabbing; }
+.overlay { position: absolute; left: 12px; top: 10px; font-family: var(--font-mono); font-size: 13px; color: var(--ink); display: grid; gap: 2px; pointer-events: none; }
+.overlay b { font-weight: 600; }
+.overlay .dim { color: var(--muted); font-size: 11px; }
+.stagebar { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; padding: 10px 14px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+.legend { display: inline-flex; align-items: center; gap: 6px; }
+.swatch { width: 44px; height: 8px; border-radius: 4px; background: linear-gradient(90deg, var(--cold), var(--hot2), var(--hot)); }
+.dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+
+.panel { display: grid; gap: 14px; min-width: 0; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: grid; gap: 10px; }
+.card h2 { font-size: 13px; font-weight: 500; letter-spacing: .06em; color: var(--muted); margin: 0; text-transform: uppercase; font-family: var(--font-mono); }
+.readouts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
+.ro { display: grid; gap: 2px; }
+.ro .lab { font-size: 12px; color: var(--muted); }
+.ro .val { font-family: var(--font-mono); font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.ro .val small { font-size: 12px; font-weight: 400; color: var(--muted); margin-left: 2px; }
+.ro .val.hot { color: var(--hot); }
+#spark { display: block; width: 100%; height: 56px; }
+.paths { display: grid; gap: 6px; font-size: 12px; }
+.path { display: grid; grid-template-columns: 62px 1fr 44px; gap: 8px; align-items: center; }
+.bar { height: 8px; background: var(--surface2); border-radius: 4px; overflow: hidden; }
+.bar i { display: block; height: 100%; width: 0; background: var(--hot2); transition: width .2s; }
+.path b { font-family: var(--font-mono); font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+label.field { display: grid; gap: 4px; font-size: 12px; color: var(--muted); min-width: 0; }
+.field .fv { font-family: var(--font-mono); color: var(--ink); font-size: 13px; font-variant-numeric: tabular-nums; }
+input[type=range] { width: 100%; accent-color: var(--hot); margin: 0; }
+select, button {
+  font: inherit; font-size: 14px; color: var(--ink); background: var(--surface2);
+  border: 1px solid var(--line); border-radius: 7px; padding: 7px 12px; cursor: pointer;
+}
+select { padding: 5px 8px; font-size: 13px; }
+button:hover { border-color: var(--steel); }
+button:focus-visible, select:focus-visible, input:focus-visible, details summary:focus-visible { outline: 2px solid var(--cold); outline-offset: 2px; }
+button.primary { background: var(--hot); border-color: var(--hot); color: #fff; font-weight: 500; }
+button.primary:hover { filter: brightness(1.08); }
+button:disabled { opacity: .5; cursor: default; }
+.progress { height: 6px; background: var(--surface2); border-radius: 3px; overflow: hidden; }
+.progress i { display: block; height: 100%; width: 0; background: var(--hot); transition: width .15s; }
+.status { font-size: 12px; color: var(--muted); font-family: var(--font-mono); min-height: 1.4em; }
+details.params summary { cursor: pointer; font-size: 13px; color: var(--muted); list-style: none; display: flex; align-items: center; gap: 6px; }
+details.params summary::before { content: "▸"; font-size: 11px; transition: transform .15s; }
+details.params[open] summary::before { transform: rotate(90deg); }
+details.params .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; padding-top: 10px; }
+
+.results { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+@media (max-width: 860px) { .results { grid-template-columns: minmax(0, 1fr); } }
+.chart { width: 100%; height: auto; display: block; }
+.chart text { font-family: var(--font-mono); fill: var(--muted); font-size: 11px; }
+.chart .axis { stroke: var(--line); }
+.chart .grid { stroke: var(--line); stroke-dasharray: 2 4; }
+.chart .curve { fill: none; stroke: var(--hot); stroke-width: 2; }
+.chart .pt { fill: var(--surface); stroke: var(--hot); stroke-width: 2; }
+.chart .pt.best { fill: var(--hot); }
+.chart .plateau { fill: var(--hot2); opacity: .14; }
+.chart .base { stroke: var(--cold); stroke-dasharray: 4 4; }
+.chart .lbl { fill: var(--ink); font-weight: 600; }
+.chart .ttl { fill: var(--ink); font-family: var(--font-body); font-size: 12px; }
+.verdict { display: grid; gap: 8px; }
+.verdict .big { font-family: var(--font-mono); font-size: 40px; font-weight: 600; color: var(--hot); line-height: 1; font-variant-numeric: tabular-nums; }
+.verdict .big small { font-size: 16px; color: var(--muted); font-weight: 400; }
+.verdict p { margin: 0; }
+.empty { color: var(--muted); font-size: 14px; }
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
+th, td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font-weight: 500; color: var(--muted); font-size: 12px; }
+td:first-child, th:first-child { text-align: left; font-family: var(--font-mono); }
+tr.best td { color: var(--hot); font-weight: 600; }
+tr.best td:first-child::after { content: " ●"; font-size: 9px; vertical-align: middle; }
+.notes { display: grid; gap: 14px; }
+.notes h2 { font-size: 18px; margin: 0; }
+.notes .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px 22px; }
+.notes h3 { font-size: 14px; margin: 0 0 6px; }
+.notes ul { margin: 0; padding-left: 18px; color: var(--muted); font-size: 14px; display: grid; gap: 4px; }
+.notes code { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+@media (prefers-reduced-motion: reduce) { .bar i, .progress i, details.params summary::before { transition: none; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">三维粒子模拟 · WebGPU 计算 · 自然对流 + 蒸发 + 风扇射流</div>
+    <h1>壶盖开多大，水凉得最快？（3D 版）</h1>
+    <p class="lede">把照片里那只 304 不锈钢鹅颈壶放进一个三维房间：圆柱壶身、锥形壶肩、绕直径翻转的圆壶盖、一直敞开的鹅颈壶嘴，以及壶口前方正对着吹的小风扇。计算在 WebGPU 上做：几十万个微团、每格 8–12 单位的压力网格，壶盖缝和壶嘴都能分辨出来；浏览器没有 WebGPU 时自动回退到 CPU 版（1 万微团、网格 20）。拖动画面可以旋转，滚轮缩放。</p>
+  </header>
+
+  <section class="bench">
+    <div class="stage">
+      <canvas id="scene" aria-label="三维壶体粒子动画"></canvas>
+      <div class="overlay"><span>θ = <b id="ovAngle">60°</b></span><span id="ovFan">风扇 2.5</span><span class="dim" id="ovBackend">正在启动…</span><span class="dim">拖动旋转 · 滚轮缩放 · 画面最多显示 15 万个微团</span></div>
+      <div class="stagebar">
+        <span class="legend"><span class="swatch"></span> 微团温度 25 → 95 ℃</span>
+        <span class="legend"><span class="dot" style="background:var(--steel)"></span> 壶壁（半透明，随水温）</span>
+        <span class="legend"><span class="dot" style="background:var(--cold);opacity:.35"></span> 风扇射流范围</span>
+        <span class="legend">细圈 = 壶口与壶嘴的热流计量面</span>
+      </div>
+    </div>
+
+    <aside class="panel">
+      <div class="card">
+        <h2>读数</h2>
+        <div class="readouts">
+          <div class="ro"><span class="lab">水温</span><span class="val hot" id="roTw">95.00<small>℃</small></span></div>
+          <div class="ro"><span class="lab">已降温</span><span class="val" id="roDT">0.00<small>℃</small></span></div>
+          <div class="ro"><span class="lab">步数</span><span class="val" id="roT">0</span></div>
+          <div class="ro"><span class="lab">每千步降温</span><span class="val" id="roRate">–<small>℃</small></span></div>
+        </div>
+        <canvas id="spark" width="600" height="112" aria-label="本次运行的水温曲线"></canvas>
+        <div class="paths">
+          <div class="path"><span>经壶口</span><div class="bar"><i id="bLid"></i></div><b id="pLid">–</b></div>
+          <div class="path"><span>经壶嘴</span><div class="bar"><i id="bSpout"></i></div><b id="pSpout">–</b></div>
+          <div class="path"><span>壶壁外侧</span><div class="bar"><i id="bWall"></i></div><b id="pWall">–</b></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>控制</h2>
+        <label class="field" for="angle">壶盖开度 <span class="fv" id="angleVal">60°</span>
+          <input type="range" id="angle" min="0" max="150" step="5" value="60">
+        </label>
+        <label class="field" for="fanU">风扇风速 <span class="fv" id="fanUVal">2.5（≈ 热羽流的 0.8 倍）</span>
+          <input type="range" id="fanU" min="0" max="16" step="0.5" value="2.5">
+        </label>
+        <label class="field" for="fanY">风扇中心高度 <span class="fv" id="fanYVal">与壶口齐平</span>
+          <input type="range" id="fanY" min="150" max="370" step="10" value="270">
+        </label>
+        <label class="field" for="fanPitch">风扇俯角 <span class="fv" id="fanPitchVal">水平吹</span>
+          <input type="range" id="fanPitch" min="0" max="60" step="2" value="0">
+        </label>
+        <div class="row"><button id="btnAim" type="button">把风扇架高并对准壶口</button></div>
+        <label class="field" for="bounce">微团撞壁方式
+          <select id="bounce"><option value="0" selected>镜面反弹（保留全部速度）</option><option value="1">贴壁滑移（法向速度被壁面吸收）</option><option value="2">贴壁滑移 + 半摩擦（切向速度减半）</option></select>
+        </label>
+        <label class="field" for="hinge">壶盖掀开方向
+          <select id="hinge"><option value="far" selected>朝风扇掀开（铰链在远侧）</option><option value="near">背向风扇掀开（铰链在风扇侧）</option></select>
+        </label>
+        <div class="row">
+          <button id="btnPlay" type="button">暂停</button>
+          <button id="btnReset" type="button">重置</button>
+          <label class="field" for="speed">速度
+            <select id="speed"><option value="1">演示</option><option value="3" selected>3 步/帧</option><option value="0">快进</option></select>
+          </label>
+        </div>
+        <label class="field" for="quality">扫描精度
+          <select id="quality"><option value="standard" selected>标准</option></select>
+        </label>
+        <button id="btnScan" class="primary" type="button">扫描开度，找最快</button>
+        <div class="progress"><i id="prog"></i></div>
+        <div class="status" id="status">就绪</div>
+        <details class="params">
+          <summary>模型参数</summary>
+          <div class="grid">
+            <label class="field" for="pAlpha">壶壁换热 α <span class="fv" id="pAlphav">0.10</span><input type="range" id="pAlpha" min="0" max="0.4" step="0.02" value="0.1"></label>
+            <label class="field" for="pLat">蒸发潜热系数 λ <span class="fv" id="pLatv">4.0</span><input type="range" id="pLat" min="0" max="10" step="0.5" value="4"></label>
+            <label class="field" for="pBuoy">浮力 <span class="fv" id="pBuoyv">0.15</span><input type="range" id="pBuoy" min="0.02" max="0.4" step="0.01" value="0.15"></label>
+            <label class="field" for="pNoise">热扰动 <span class="fv" id="pNoisev">0.20</span><input type="range" id="pNoise" min="0.05" max="0.6" step="0.05" value="0.2"></label>
+            <label class="field" for="pKp">压力推力 <span class="fv" id="pKpv">4.0</span><input type="range" id="pKp" min="1" max="10" step="0.5" value="4"></label>
+            <label class="field" for="pCw">水的热容 <span class="fv" id="pCwv">20000</span><input type="range" id="pCw" min="5000" max="60000" step="1000" value="20000"></label>
+            <label class="field" for="pSeeds">随机种子数 <span class="fv" id="pSeedsv">1</span><input type="range" id="pSeeds" min="1" max="3" step="1" value="1"></label>
+          </div>
+        </details>
+      </div>
+    </aside>
+  </section>
+
+  <section class="results">
+    <div class="card">
+      <h2>扫描结果：稳定段降温量随开度变化</h2>
+      <svg class="chart" id="chart" viewBox="0 0 560 300" role="img" aria-label="各开度下的降温量"></svg>
+    </div>
+    <div class="card">
+      <h2>结论</h2>
+      <div class="verdict" id="verdict"><p class="empty">点击「扫描开度」后，这里会给出散热最快的开度区间（与最高值相差 3% 以内的所有开度），而不是单一角度：单组随机数下相邻开度之间百分之几的差别是扰动，不是结论。每个开度先跑前三分之一步数让壶内换气进入稳定状态，再统计后三分之二的降温量。</p></div>
+      <div class="tablewrap"><table id="tbl" hidden>
+        <thead><tr><th>开度</th><th>降温 ℃</th><th>±</th><th>相对闭盖</th><th>壶口</th><th>壶嘴</th><th>壶壁</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </div>
+  </section>
+
+  <section class="notes card">
+    <h2>模型说明</h2>
+    <div class="cols">
+      <div>
+        <h3>几何（1 单位 ≈ 0.85 mm）</h3>
+        <ul>
+          <li>壶身：半径 95、高 220 的圆柱，上接锥形壶肩收到半径 40 的圆壶口，壶口高 265；水面在 120，水面以上是壶内空气。</li>
+          <li>壶盖：半径 46 的圆盘，绕壶口边缘一条水平直径翻转；0° 时盖住壶口，90° 竖立，150° 向后仰。</li>
+          <li>壶嘴：半径 11 的直管，从壶身上部斜向上 52° 伸出 120，管口始终敞开；按水位以上与壶内连通处理。</li>
+          <li>房间 660 × 420 × 440，六面都是 25 ℃ 的无限空气源；桌面绝热。风扇在 x = −270、叶轮半径 54，正对 +x 方向吹。</li>
+          <li>压力网格：WebGPU 下每格 8–12 单位（标准档 10 单位，约 12 万格，20 万微团），壶盖开 15° 时的缝约 1.2 格、壶嘴内径约 2 格；CPU 回退版每格 20 单位，这两处都不到一格。</li>
+        </ul>
+      </div>
+      <div>
+        <h3>微团怎么动</h3>
+        <ul>
+          <li>每个粒子是一小团空气，带温度 <code>T</code> 和水汽含量 <code>h</code>。受力：热浮力 ∝ (T − 25 ℃)，从拥挤网格向稀疏网格的压力推力（壶壁所在的网格不传递压力），随机热扰动，以及阻力。</li>
+          <li>粒子与圆柱、圆锥、圆盘、圆管做解析曲面碰撞，每步最多处理 3 次接触，步与步之间不限；壁面温度等于当前水温，接触时按系数 α 交换显热；壶盖和桌面绝热。撞壁方式可选：镜面反弹（速度大小不变，法向反向，像光打在镜子上）；贴壁滑移（壁面吸收法向动量，微团沿壁面继续走，相当于无粘流的不可穿透条件，射流打到壶盖上会贴着盖子摊开而不是被弹回去）；再加半摩擦则切向速度也减半，模拟边界层的损失。</li>
+          <li>触到水面的微团被加热到水温并带走饱和水汽 <code>h = λ·(T水 − 25)</code>，代表蒸发潜热。</li>
+          <li>速度单位是"每步位移"。热微团在浮力与阻力平衡下的上升速度是 0.15 / 0.05 = 3，这就是壶口热羽流的速度，风速要和它比：桌面小风扇出口风速通常是热羽流的 5–10 倍。每步位移上限是 4（压力网格和碰撞处理的稳定性要求），所以风速超过 4 时不是截断，而是把时间步缩短为 dt = 4 / 风速：各项力乘 dt、热扰动乘 √dt、阻力和混合按 dt 次幂衰减，扫描步数按 1/dt 加长，物理时长不变。</li>
+          <li>风扇按圆射流处理：势核约 5 个叶轮直径，之后中心风速按 1/x 衰减，射流半径随距离线性张开；壶外微团沿射流轴向的速度分量向当地射流速度弛豫，横向分量不受影响，壶内不直接受风。风扇可以架高并带俯角，射流轴线随之向下倾斜；「对准壶口」按钮把风扇抬到壶口上方约 8 cm，并把俯角设到轴线正穿过壶口中心。</li>
+          <li>两个标度约定，保证换网格、换粒子数时物理不变：压力推力是真正的密度梯度（相邻格密度差除以格距，以格距 20 为标定基准）；每个微团代表的空气质量 ∝ 1/n，所以水的热容按 n/10000 缩放，每步的冷却速率与粒子数无关。</li>
+          <li>WebGPU 版把同一套模型写成 7 个 compute shader：沉积（定点整数原子加）、密度整理、平滑、梯度、粒子更新、水温更新。所有求和都用整数原子操作，结果与运行顺序无关，同一组随机数下可逐位复现；随机数由（种子、粒子号、步数）哈希得到。</li>
+        </ul>
+      </div>
+      <div>
+        <h3>怎么比较</h3>
+        <ul>
+          <li>每个开度从同一初始状态、同一随机数序列出发（共同随机数法）。壶内换气需要上千步才进入稳定状态，所以前三分之一步数只当预热，只统计之后的降温量。</li>
+          <li>结论报的是"最快区间"：所有降温量在最高值 3% 以内的开度。单组随机数下相邻开度的差别常在 2–3%，单挑一个 argmax 会在不同分辨率、不同后端之间来回跳，区间才是稳定的结论；想压低扰动就把随机种子数调到 3。</li>
+          <li>热量去向：壶壁外侧直接散给房间；进入壶内空气的热（水面 + 壶壁内侧）最终从壶口或壶嘴离开，两者按计量面上测得的焓流比例分配。</li>
+          <li>相比 2D 剖面：风可以绕过壶身，壶盖只挡住壶口一侧，热羽流是轴对称的。壶壁面积比壶口大得多，所以 α 的取值直接决定壶壁与壶口两条通道的比重，可以在参数里调。</li>
+          <li>压力仍然是"拥挤处往稀疏处推"的近似，不是真正的不可压求解；网格细了能看清壶盖缝，但壶盖前的驻点高压、壶腔回流仍只有定性意义。</li>
+          <li>未模拟：辐射散热、壶盖本身的导热与蓄热、水的内部对流、真实绕流中的驻点压力。这仍是一个定性模型；要可信的分钟数，拿这只壶做实验更快。</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+/* Kettle lid-opening particle simulation — 3D core (no DOM). y is up, desk at y = 0. */
+(function (root) {
+'use strict';
+
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Room half-extents (x, z) and height (y). 1 unit ≈ 0.85 mm.
+const DOM = { X: 330, Y: 420, Z: 220 };
+const CS_REF = 20;   // cell size the pressure stiffness kp was calibrated at
+const N_REF = 10000; // particle count the water heat capacity Cw refers to (each parcel carries mass ∝ 1/n)
+
+const K = {
+  Rb: 95, Hb: 220,            // body cylinder radius / height
+  Ro: 40, rimY: 265,          // opening radius / rim height (top of the conical shoulder)
+  waterY: 120, baseH: 24,
+  Rl: 46,                     // lid disc radius
+  spR: 11, spP0: [-95, 189, 0], spAng: 52, spLen: 120,
+  fanX: -270, fanY: 270, fanR: 54,
+};
+(function () {
+  const a = K.spAng * Math.PI / 180;
+  K.spD = [-Math.cos(a), Math.sin(a), 0];
+  K.spE1 = [0, 0, 1];
+  K.spE2 = [K.spD[1], -K.spD[0], 0];
+  K.spP1 = [K.spP0[0] + K.spD[0] * K.spLen, K.spP0[1] + K.spD[1] * K.spLen, 0];
+  K.coneB = (K.Ro - K.Rb) / (K.rimY - K.Hb);
+  K.coneA = K.Rb - K.coneB * K.Hb;
+})();
+
+const DEFAULTS = {
+  n: 10000, Tw0: 95, Ta: 25, Cw: 20000,
+  alphaWall: 0.1, qWater: 1.0, latent: 4,
+  buoy: 0.15, drag: 0.05, noise: 0.2, kp: 4, kappa: 0.03,
+  cs: 20, seed: 1234, vmax: 4,   // vmax: displacement cap per step; a faster fan shrinks the time-step dt = vmax / fanU instead
+  fanU: 2.5, fanY: 270, fanK: 0.15, fanPitch: 0,   // fanPitch: degrees the jet axis points below horizontal
+  bounce: 0,      // 0 = specular (mirror) reflection, 1 = free-slip (normal velocity absorbed), 2 = slip with half the tangential velocity kept
+  hinge: 'far',   // 'far' = hinge on the side away from the fan (lid opens toward the fan); 'near' = hinge on the fan side
+};
+
+const SCAN_SETS = {
+  fast: [0, 20, 45, 70, 90, 120, 150],
+  standard: [0, 15, 30, 45, 60, 75, 90, 105, 120, 150],
+  fine: [0, 10, 20, 30, 45, 60, 75, 90, 105, 120, 135, 150],
+};
+
+function bodyR(y) { return y <= K.Hb ? K.Rb : K.coneA + K.coneB * y; }
+
+function isInside(x, y, z) {
+  if (y < K.rimY && y > K.waterY - 1) {
+    const r = bodyR(y);
+    if (x * x + z * z < r * r) return true;
+  }
+  const dx = x - K.spP0[0], dy = y - K.spP0[1];
+  const w = dx * K.spD[0] + dy * K.spD[1];
+  if (w >= 0 && w <= K.spLen) {
+    const u = z, v = dx * K.spE2[0] + dy * K.spE2[1];
+    if (u * u + v * v < K.spR * K.spR) return true;
+  }
+  return false;
+}
+
+class KettleSim3D {
+  constructor(params) {
+    this.p = Object.assign({}, DEFAULTS, params || {});
+    this.alloc();
+    this.setAngle(0);
+    this.reset(this.p.seed);
+  }
+
+  alloc() {
+    const n = this.n = this.p.n, cs = this.cs = this.p.cs;
+    this.px = new Float32Array(n); this.py = new Float32Array(n); this.pz = new Float32Array(n);
+    this.vx = new Float32Array(n); this.vy = new Float32Array(n); this.vz = new Float32Array(n);
+    this.T = new Float32Array(n); this.Hm = new Float32Array(n);
+    this.side = new Uint8Array(n);
+    this.nx = Math.ceil(2 * DOM.X / cs); this.ny = Math.ceil(DOM.Y / cs); this.nz = Math.ceil(2 * DOM.Z / cs);
+    const gc = this.nx * this.ny * this.nz;
+    this.rho = new Float32Array(gc); this.rhoSm = new Float32Array(gc);
+    this.gx = new Float32Array(gc); this.gy = new Float32Array(gc); this.gz = new Float32Array(gc);
+    this.rhoS = [new Float32Array(gc), new Float32Array(gc)];
+    this.rTS = [new Float32Array(gc), new Float32Array(gc)];
+    this.rHS = [new Float32Array(gc), new Float32Array(gc)];
+    this.solid = new Uint8Array(gc);   // water: density copied from neighbours
+    this.wallc = new Uint8Array(gc);   // kettle shell: pressure gradients do not cross it
+    this.ci = new Int32Array(8); this.cw = new Float32Array(8);
+    let free = 0;
+    for (let iz = 0; iz < this.nz; iz++) for (let iy = 0; iy < this.ny; iy++) for (let ix = 0; ix < this.nx; ix++) {
+      const x = (ix + 0.5) * cs - DOM.X, y = (iy + 0.5) * cs, z = (iz + 0.5) * cs - DOM.Z;
+      const r = Math.sqrt(x * x + z * z), c = (iz * this.ny + iy) * this.nx + ix;
+      const s = (y < K.waterY && r < K.Rb);
+      this.solid[c] = s ? 1 : 0;
+      this.wallc[c] = (!s && y <= K.rimY && Math.abs(r - bodyR(y)) <= cs * 0.5) ? 1 : 0;
+      if (!s) free++;
+    }
+    this.freeCells = free;
+  }
+
+  setParams(q) {
+    const needAlloc = (q.n !== undefined && q.n !== this.p.n);
+    Object.assign(this.p, q);
+    if (needAlloc) { this.alloc(); this.reset(this.p.seed); }
+    this.setAngle(this.angle || 0);
+  }
+
+  reset(seed) {
+    const p = this.p;
+    this.rng = mulberry32(seed === undefined ? p.seed : seed);
+    this.spare = null;
+    for (let i = 0; i < this.n; i++) {
+      let x, y, z;
+      for (;;) {
+        x = (this.rng() * 2 - 1) * DOM.X; y = this.rng() * (DOM.Y - 2) + 1; z = (this.rng() * 2 - 1) * DOM.Z;
+        if (y < K.waterY + 1 && x * x + z * z < (K.Rb + 2) * (K.Rb + 2)) continue;
+        break;
+      }
+      this.px[i] = x; this.py[i] = y; this.pz[i] = z;
+      this.vx[i] = 0; this.vy[i] = 0; this.vz[i] = 0;
+      const inside = isInside(x, y, z);
+      this.side[i] = inside ? 1 : 0;
+      this.T[i] = inside ? p.Tw0 : p.Ta;
+      this.Hm[i] = inside ? p.latent * (p.Tw0 - p.Ta) : 0;
+    }
+    this.Tw = p.Tw0; this.t = 0;
+    this.Qwater = 0; this.QwallIn = 0; this.QwallOut = 0;
+    this.fluxLid = 0; this.fluxSpout = 0;
+    this.hist = [p.Tw0];
+  }
+
+  setAngle(deg) {
+    this.angle = deg;
+    const a = deg * Math.PI / 180;
+    const s = this.p.hinge === 'near' ? -1 : 1;    // hinge x = s * Ro
+    this.hingeX = s * K.Ro;
+    const dx = -s * Math.cos(a), dy = Math.sin(a);
+    this.lidC = [this.hingeX + K.Rl * dx, K.rimY + K.Rl * dy, 0];
+    this.lidN = [s * Math.sin(a), Math.cos(a), 0];
+    this.lidD = [dx, dy, 0];
+  }
+
+  gauss() {
+    if (this.spare !== null) { const s = this.spare; this.spare = null; return s; }
+    let u = 0; while (u === 0) u = this.rng();
+    const v = this.rng();
+    const r = Math.sqrt(-2 * Math.log(u)), th = 2 * Math.PI * v;
+    this.spare = r * Math.sin(th);
+    return r * Math.cos(th);
+  }
+
+  // trilinear corner indices + weights for (x, y, z) into this.ci / this.cw
+  corners(x, y, z) {
+    const cs = this.cs, nx = this.nx, ny = this.ny, nz = this.nz;
+    let fx = (x + DOM.X) / cs - 0.5, fy = y / cs - 0.5, fz = (z + DOM.Z) / cs - 0.5;
+    if (fx < 0) fx = 0; else if (fx > nx - 1.001) fx = nx - 1.001;
+    if (fy < 0) fy = 0; else if (fy > ny - 1.001) fy = ny - 1.001;
+    if (fz < 0) fz = 0; else if (fz > nz - 1.001) fz = nz - 1.001;
+    const ix = fx | 0, iy = fy | 0, iz = fz | 0;
+    const wx = fx - ix, wy = fy - iy, wz = fz - iz;
+    const ix1 = ix + 1 < nx ? 1 : 0, iy1 = iy + 1 < ny ? nx : 0, iz1 = iz + 1 < nz ? nx * ny : 0;
+    const base = (iz * ny + iy) * nx + ix;
+    const ci = this.ci, cw = this.cw;
+    ci[0] = base;             cw[0] = (1 - wx) * (1 - wy) * (1 - wz);
+    ci[1] = base + ix1;       cw[1] = wx * (1 - wy) * (1 - wz);
+    ci[2] = base + iy1;       cw[2] = (1 - wx) * wy * (1 - wz);
+    ci[3] = base + ix1 + iy1; cw[3] = wx * wy * (1 - wz);
+    ci[4] = base + iz1;             cw[4] = (1 - wx) * (1 - wy) * wz;
+    ci[5] = base + ix1 + iz1;       cw[5] = wx * (1 - wy) * wz;
+    ci[6] = base + iy1 + iz1;       cw[6] = (1 - wx) * wy * wz;
+    ci[7] = base + ix1 + iy1 + iz1; cw[7] = wx * wy * wz;
+  }
+  samp(g) {
+    const ci = this.ci, cw = this.cw;
+    return g[ci[0]] * cw[0] + g[ci[1]] * cw[1] + g[ci[2]] * cw[2] + g[ci[3]] * cw[3]
+         + g[ci[4]] * cw[4] + g[ci[5]] * cw[5] + g[ci[6]] * cw[6] + g[ci[7]] * cw[7];
+  }
+
+  deposit() {
+    const nx = this.nx, ny = this.ny, nz = this.nz, gc = nx * ny * nz;
+    const rhoS = this.rhoS, rTS = this.rTS, rHS = this.rHS, rho = this.rho;
+    for (let s = 0; s < 2; s++) { rhoS[s].fill(0); rTS[s].fill(0); rHS[s].fill(0); }
+    const ci = this.ci, cw = this.cw;
+    for (let k = 0; k < this.n; k++) {
+      this.corners(this.px[k], this.py[k], this.pz[k]);
+      const sd = this.side[k], r = rhoS[sd], rT = rTS[sd], rH = rHS[sd], T = this.T[k], Hm = this.Hm[k];
+      for (let c = 0; c < 8; c++) { const i = ci[c], w = cw[c]; r[i] += w; rT[i] += w * T; rH[i] += w * Hm; }
+    }
+    const r0 = rhoS[0], r1 = rhoS[1];
+    for (let c = 0; c < gc; c++) rho[c] = r0[c] + r1[c];
+    const solid = this.solid, sx = 1, sy = nx, sz = nx * ny;
+    for (let iz = 0; iz < nz; iz++) for (let iy = 0; iy < ny; iy++) for (let ix = 0; ix < nx; ix++) {
+      const c = (iz * ny + iy) * nx + ix;
+      if (!solid[c]) continue;
+      let s = 0, m = 0;
+      if (ix > 0 && !solid[c - sx]) { s += rho[c - sx]; m++; }
+      if (ix < nx - 1 && !solid[c + sx]) { s += rho[c + sx]; m++; }
+      if (iy > 0 && !solid[c - sy]) { s += rho[c - sy]; m++; }
+      if (iy < ny - 1 && !solid[c + sy]) { s += rho[c + sy]; m++; }
+      if (iz > 0 && !solid[c - sz]) { s += rho[c - sz]; m++; }
+      if (iz < nz - 1 && !solid[c + sz]) { s += rho[c + sz]; m++; }
+      rho[c] = m ? s / m : this.rhoMean;
+    }
+    // 7-point smoothing, then central-difference gradient (zero gradient into walls / out of the room)
+    const sm = this.rhoSm, gx = this.gx, gy = this.gy, gz = this.gz;
+    for (let iz = 0; iz < nz; iz++) for (let iy = 0; iy < ny; iy++) for (let ix = 0; ix < nx; ix++) {
+      const c = (iz * ny + iy) * nx + ix, v = rho[c];
+      const xm = ix > 0 ? rho[c - sx] : v, xp = ix < nx - 1 ? rho[c + sx] : v;
+      const ym = iy > 0 ? rho[c - sy] : v, yp = iy < ny - 1 ? rho[c + sy] : v;
+      const zm = iz > 0 ? rho[c - sz] : v, zp = iz < nz - 1 ? rho[c + sz] : v;
+      sm[c] = (2 * v + xm + xp + ym + yp + zm + zp) / 8;
+    }
+    const wallc = this.wallc, gs = 0.5 * (CS_REF / this.cs);   // true gradient, calibrated at CS_REF
+    for (let iz = 0; iz < nz; iz++) for (let iy = 0; iy < ny; iy++) for (let ix = 0; ix < nx; ix++) {
+      const c = (iz * ny + iy) * nx + ix, v = sm[c];
+      if (wallc[c]) { gx[c] = 0; gy[c] = 0; gz[c] = 0; continue; }
+      const xm = (ix > 0 && !solid[c - sx] && !wallc[c - sx]) ? sm[c - sx] : v, xp = (ix < nx - 1 && !solid[c + sx] && !wallc[c + sx]) ? sm[c + sx] : v;
+      const ym = (iy > 0 && !solid[c - sy] && !wallc[c - sy]) ? sm[c - sy] : v, yp = (iy < ny - 1 && !solid[c + sy] && !wallc[c + sy]) ? sm[c + sy] : v;
+      const zm = (iz > 0 && !solid[c - sz] && !wallc[c - sz]) ? sm[c - sz] : v, zp = (iz < nz - 1 && !solid[c + sz] && !wallc[c + sz]) ? sm[c + sz] : v;
+      gx[c] = (xp - xm) * gs; gy[c] = (yp - ym) * gs; gz[c] = (zp - zm) * gs;
+    }
+  }
+
+  // round jet from the fan along the axis (fux, fuy, 0): speed on the axis, 0 outside the cone
+  wind(x, y, z) {
+    const p = this.p;
+    const rx = x - K.fanX, ry = y - p.fanY;
+    const d = rx * this.fux + ry * this.fuy;
+    if (p.fanU <= 0 || d <= 0) return 0;
+    const R = K.fanR, D = 2 * R, b = R + 0.11 * d;
+    const qx = rx - d * this.fux, qy = ry - d * this.fuy;
+    const r2 = (qx * qx + qy * qy + z * z) / (b * b);
+    if (r2 >= 1) return 0;
+    const uc = d < 5 * D ? 1 : 5 * D / d;
+    return p.fanU * uc * (1 - r2);
+  }
+
+  // earliest surface hit along the step; fills this.hT / hNx,hNy,hNz / hType / hId
+  nearestHit(x0, y0, z0, x1, y1, z1, skip) {
+    let best = 2, type = 0, id = -1, nx = 0, ny = 0, nz = 0;
+    const dx = x1 - x0, dy = y1 - y0, dz = z1 - z0;
+    // 1: floor
+    if (skip !== 1 && y1 < 0 && y0 >= 0) { const t = y0 / (y0 - y1); if (t < best) { best = t; type = 'floor'; id = 1; nx = 0; ny = 1; nz = 0; } }
+    const near = (x0 * x0 + z0 * z0 < 160 * 160 || x1 * x1 + z1 * z1 < 160 * 160) && (y0 < K.rimY + 60 || y1 < K.rimY + 60);
+    if (near) {
+      // 2: body cylinder r = Rb, 0 <= y <= Hb
+      if (skip !== 2) {
+        const a = dx * dx + dz * dz, b = 2 * (x0 * dx + z0 * dz), c = x0 * x0 + z0 * z0 - K.Rb * K.Rb;
+        if (a > 1e-12) {
+          const disc = b * b - 4 * a * c;
+          if (disc >= 0) {
+            const sq = Math.sqrt(disc);
+            for (let k = 0; k < 2; k++) {
+              const t = (k === 0 ? -b - sq : -b + sq) / (2 * a);
+              if (t > 0 && t <= 1 && t < best) {
+                const hy = y0 + dy * t;
+                if (hy >= 0 && hy <= K.Hb) {
+                  const hx = x0 + dx * t, hz = z0 + dz * t;
+                  // hole where the spout joins the body
+                  const qx = hx - K.spP0[0], qy = hy - K.spP0[1];
+                  const w = qx * K.spD[0] + qy * K.spD[1], v = qx * K.spE2[0] + qy * K.spE2[1];
+                  if (!(w > -14 && w < 14 && hz * hz + v * v < K.spR * K.spR)) {
+                    best = t; type = 'wall'; id = 2; nx = hx / K.Rb; ny = 0; nz = hz / K.Rb;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      // 3: conical shoulder r = A + B*y, Hb <= y <= rimY
+      if (skip !== 3) {
+        const A = K.coneA, B = K.coneB, r0 = A + B * y0;
+        const a = dx * dx + dz * dz - B * B * dy * dy;
+        const b = 2 * (x0 * dx + z0 * dz) - 2 * B * dy * r0;
+        const c = x0 * x0 + z0 * z0 - r0 * r0;
+        if (Math.abs(a) > 1e-12) {
+          const disc = b * b - 4 * a * c;
+          if (disc >= 0) {
+            const sq = Math.sqrt(disc);
+            for (let k = 0; k < 2; k++) {
+              const t = (k === 0 ? -b - sq : -b + sq) / (2 * a);
+              if (t > 0 && t <= 1 && t < best) {
+                const hy = y0 + dy * t;
+                if (hy >= K.Hb && hy <= K.rimY) {
+                  const hx = x0 + dx * t, hz = z0 + dz * t, rr = A + B * hy;
+                  let gxn = hx, gyn = -B * rr, gzn = hz;
+                  const L = Math.sqrt(gxn * gxn + gyn * gyn + gzn * gzn);
+                  best = t; type = 'wall'; id = 3; nx = gxn / L; ny = gyn / L; nz = gzn / L;
+                }
+              }
+            }
+          }
+        }
+      }
+      // 4: water surface y = waterY (inside the body), hit from above
+      if (skip !== 4 && y0 > K.waterY && y1 <= K.waterY) {
+        const t = (y0 - K.waterY) / (y0 - y1);
+        if (t < best) {
+          const hx = x0 + dx * t, hz = z0 + dz * t;
+          if (hx * hx + hz * hz <= K.Rb * K.Rb) { best = t; type = 'water'; id = 4; nx = 0; ny = 1; nz = 0; }
+        }
+      }
+      // 5: lid disc
+      if (skip !== 5) {
+        const C = this.lidC, N = this.lidN;
+        const s0 = (x0 - C[0]) * N[0] + (y0 - C[1]) * N[1], s1 = (x1 - C[0]) * N[0] + (y1 - C[1]) * N[1];
+        if ((s0 > 0 && s1 <= 0) || (s0 < 0 && s1 >= 0)) {
+          const t = s0 / (s0 - s1);
+          if (t < best) {
+            const hx = x0 + dx * t - C[0], hy = y0 + dy * t - C[1], hz = z0 + dz * t;
+            if (hx * hx + hy * hy + hz * hz <= K.Rl * K.Rl) { best = t; type = 'lid'; id = 5; nx = N[0]; ny = N[1]; nz = 0; }
+          }
+        }
+      }
+      // 6: spout tube, radius spR, axial 0..spLen
+      if (skip !== 6) {
+        const qx = x0 - K.spP0[0], qy = y0 - K.spP0[1];
+        const u0 = z0, v0 = qx * K.spE2[0] + qy * K.spE2[1], w0 = qx * K.spD[0] + qy * K.spD[1];
+        const du = dz, dv = dx * K.spE2[0] + dy * K.spE2[1], dw = dx * K.spD[0] + dy * K.spD[1];
+        const a = du * du + dv * dv, b = 2 * (u0 * du + v0 * dv), c = u0 * u0 + v0 * v0 - K.spR * K.spR;
+        if (a > 1e-12 && (w0 > -10 || w0 + dw > -10)) {
+          const disc = b * b - 4 * a * c;
+          if (disc >= 0) {
+            const sq = Math.sqrt(disc);
+            for (let k = 0; k < 2; k++) {
+              const t = (k === 0 ? -b - sq : -b + sq) / (2 * a);
+              if (t > 0 && t <= 1 && t < best) {
+                const hw = w0 + dw * t;
+                if (hw >= 0 && hw <= K.spLen) {
+                  const hu = (u0 + du * t) / K.spR, hv = (v0 + dv * t) / K.spR;
+                  best = t; type = 'spout'; id = 6;
+                  nx = hv * K.spE2[0]; ny = hv * K.spE2[1]; nz = hu;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    if (best > 1) return false;
+    this.hT = best; this.hType = type; this.hId = id; this.hNx = nx; this.hNy = ny; this.hNz = nz;
+    return true;
+  }
+
+  exchange(type, inside, i) {
+    const p = this.p, Cw = this.CwEff;
+    if (type === 'water') {
+      const dT = p.qWater * (this.Tw - this.T[i]);
+      const hs = p.latent * (this.Tw - p.Ta);
+      let dH = p.qWater * (hs - this.Hm[i]); if (dH < 0) dH = 0;
+      this.T[i] += dT; this.Hm[i] += dH;
+      const d = dT + dH; this.Tw -= d / Cw; this.Qwater += d;
+    } else if (type === 'wall' || type === 'spout') {
+      const d = p.alphaWall * (this.Tw - this.T[i]);
+      this.T[i] += d; this.Tw -= d / Cw;
+      if (inside) this.QwallIn += d; else this.QwallOut += d;
+    }
+  }
+
+  step() {
+    const p = this.p, n = this.n;
+    this.rhoMean = n / this.freeCells;
+    this.CwEff = p.Cw * n / N_REF;
+    const pitch = (p.fanPitch || 0) * Math.PI / 180;
+    this.fux = Math.cos(pitch); this.fuy = -Math.sin(pitch);
+    const bounce = p.bounce | 0, keep = bounce === 2 ? 0.5 : 1;
+    // time-step: 1 while the fan is slower than the displacement cap, shorter beyond that (Langevin scaling)
+    const dt = this.dt = Math.min(1, p.vmax / Math.max(p.fanU, 1e-9));
+    const sqDt = Math.sqrt(dt), dragF = Math.pow(1 - p.drag, dt), fanKd = 1 - Math.pow(1 - p.fanK, dt), kappaD = 1 - Math.pow(1 - p.kappa, dt);
+    const vcap = p.vmax / dt, vcap2 = vcap * vcap;
+    this.deposit();
+    const rm = this.rhoMean, Ta = p.Ta, span = p.Tw0 - Ta, EPS = 0.05;
+    const gx = this.gx, gy = this.gy, gz = this.gz;
+    const ci = this.ci, cw = this.cw;
+    const C = this.lidC;
+    for (let i = 0; i < n; i++) {
+      let x = this.px[i], y = this.py[i], z = this.pz[i], vx = this.vx[i], vy = this.vy[i], vz = this.vz[i];
+      const T = this.T[i], wasInside = this.side[i] === 1;
+      this.corners(x, y, z);
+      let ax = 0, ay = 0, az = 0;
+      for (let c = 0; c < 8; c++) { const k = ci[c], w = cw[c]; ax += gx[k] * w; ay += gy[k] * w; az += gz[k] * w; }
+      let Tn = (T - Ta) / span; if (Tn < 0) Tn = 0;
+      if (!wasInside && p.fanU > 0) {
+        const u = this.wind(x, y, z);
+        if (u > 0.02) { const dv = fanKd * (u - (vx * this.fux + vy * this.fuy)); vx += dv * this.fux; vy += dv * this.fuy; }
+      }
+      vx += dt * (-p.kp * ax / rm) + sqDt * p.noise * this.gauss();
+      vy += dt * (-p.kp * ay / rm + p.buoy * Tn) + sqDt * p.noise * this.gauss();
+      vz += dt * (-p.kp * az / rm) + sqDt * p.noise * this.gauss();
+      vx *= dragF; vy *= dragF; vz *= dragF;
+      const v2 = vx * vx + vy * vy + vz * vz;
+      if (v2 > vcap2) { const f = vcap / Math.sqrt(v2); vx *= f; vy *= f; vz *= f; }
+
+      const x0 = x, y0 = y, z0 = z;
+      let sx = x, sy = y, sz = z, x1 = x + vx * dt, y1 = y + vy * dt, z1 = z + vz * dt, skip = -1;
+      for (let it = 0; it < 3; it++) {
+        if (!this.nearestHit(sx, sy, sz, x1, y1, z1, skip)) break;
+        const t = this.hT, nx = this.hNx, ny = this.hNy, nz = this.hNz;
+        const Xx = sx + (x1 - sx) * t, Xy = sy + (y1 - sy) * t, Xz = sz + (z1 - sz) * t;
+        const vn = vx * nx + vy * ny + vz * nz;
+        const side = vn < 0 ? 1 : -1;
+        const rx = x1 - Xx, ry = y1 - Xy, rz = z1 - Xz, rn = rx * nx + ry * ny + rz * nz;
+        if (bounce === 0) {
+          x1 = Xx + rx - 2 * rn * nx + side * EPS * nx;
+          y1 = Xy + ry - 2 * rn * ny + side * EPS * ny;
+          z1 = Xz + rz - 2 * rn * nz + side * EPS * nz;
+          vx -= 2 * vn * nx; vy -= 2 * vn * ny; vz -= 2 * vn * nz;
+        } else {
+          // the wall absorbs the normal momentum; the parcel slides on along the surface
+          x1 = Xx + (rx - rn * nx) * keep + side * EPS * nx;
+          y1 = Xy + (ry - rn * ny) * keep + side * EPS * ny;
+          z1 = Xz + (rz - rn * nz) * keep + side * EPS * nz;
+          vx = (vx - vn * nx) * keep; vy = (vy - vn * ny) * keep; vz = (vz - vn * nz) * keep;
+        }
+        this.exchange(this.hType, wasInside, i);
+        sx = Xx + side * EPS * nx; sy = Xy + side * EPS * ny; sz = Xz + side * EPS * nz;
+        skip = this.hId;
+      }
+      x = x1; y = y1; z = z1;
+      // the room: ambient, dry air comes back
+      if (x < -DOM.X) { x = -2 * DOM.X - x; vx = -vx; this.T[i] = Ta; this.Hm[i] = 0; }
+      else if (x > DOM.X) { x = 2 * DOM.X - x; vx = -vx; this.T[i] = Ta; this.Hm[i] = 0; }
+      if (z < -DOM.Z) { z = -2 * DOM.Z - z; vz = -vz; this.T[i] = Ta; this.Hm[i] = 0; }
+      else if (z > DOM.Z) { z = 2 * DOM.Z - z; vz = -vz; this.T[i] = Ta; this.Hm[i] = 0; }
+      if (y > DOM.Y) { y = 2 * DOM.Y - y; vy = -vy; this.T[i] = Ta; this.Hm[i] = 0; }
+      if (y < 0.5) { y = 0.5; vy = Math.abs(vy); }
+      if (y < K.waterY && x * x + z * z < K.Rb * K.Rb) { y = K.waterY + 1; vy = Math.abs(vy); }
+
+      // excess-enthalpy flux through the opening and the spout tip (positive = leaving)
+      const Tex = this.T[i] - Ta + this.Hm[i];
+      if ((y0 > K.rimY) !== (y > K.rimY)) {
+        const f = (K.rimY - y0) / (y - y0), cx = x0 + (x - x0) * f, cz = z0 + (z - z0) * f;
+        if (cx * cx + cz * cz <= K.Ro * K.Ro) this.fluxLid += (y > y0 ? 1 : -1) * Tex;
+      }
+      {
+        const w0 = (x0 - K.spP0[0]) * K.spD[0] + (y0 - K.spP0[1]) * K.spD[1];
+        const w1 = (x - K.spP0[0]) * K.spD[0] + (y - K.spP0[1]) * K.spD[1];
+        if ((w0 > K.spLen) !== (w1 > K.spLen)) {
+          const f = (K.spLen - w0) / (w1 - w0), cx = x0 + (x - x0) * f, cy = y0 + (y - y0) * f, cz = z0 + (z - z0) * f;
+          const v = (cx - K.spP0[0]) * K.spE2[0] + (cy - K.spP0[1]) * K.spE2[1];
+          if (v * v + cz * cz <= K.spR * K.spR) this.fluxSpout += (w1 > w0 ? 1 : -1) * Tex;
+        }
+      }
+      // mixing with neighbouring parcels on the same side of the wall
+      const sd = isInside(x, y, z) ? 1 : 0;
+      this.side[i] = sd;
+      this.corners(x, y, z);
+      const rr = this.samp(this.rhoS[sd]);
+      if (rr > 1e-4) {
+        const Tm = this.samp(this.rTS[sd]) / rr, Hmm = this.samp(this.rHS[sd]) / rr;
+        this.T[i] += kappaD * (Tm - this.T[i]);
+        this.Hm[i] += kappaD * (Hmm - this.Hm[i]);
+      }
+      this.px[i] = x; this.py[i] = y; this.pz[i] = z; this.vx[i] = vx; this.vy[i] = vy; this.vz[i] = vz;
+    }
+    this.t++;
+    if (this.t % 10 === 0) this.hist.push(this.Tw);
+  }
+
+  // Heat that entered the kettle air (water surface + inner wall) leaves through the opening or the spout;
+  // it is split between the two in proportion to the measured enthalpy fluxes.
+  summary() {
+    const p = this.p, dT = p.Tw0 - this.Tw;
+    const inner = this.Qwater + this.QwallIn;
+    const fl = Math.max(0, this.fluxLid), fs = Math.max(0, this.fluxSpout), fsum = fl + fs;
+    const lid = fsum > 0 ? inner * fl / fsum : 0, spout = fsum > 0 ? inner * fs / fsum : 0;
+    return { angle: this.angle, steps: this.t, Tw: this.Tw, dT, total: dT * p.Cw * this.n / N_REF,
+      lid, spout, wallOut: this.QwallOut, Qwater: this.Qwater, QwallIn: this.QwallIn };
+  }
+}
+
+const api = { KettleSim3D, DEFAULTS, SCAN_SETS, K, DOM, CS_REF, N_REF, isInside, bodyR };
+if (typeof module !== 'undefined' && module.exports) module.exports = api;
+else root.KettleCore3D = api;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+/* WebGPU backend for the 3D kettle simulation. Same model as KettleSim3D, run as compute shaders. */
+(function (root) {
+'use strict';
+const { K, DOM, DEFAULTS, CS_REF, N_REF, isInside } = root.KettleCore3D;
+
+const F = (v) => (Number.isInteger(v) ? v.toFixed(1) : String(v));
+
+// ---------- shared WGSL ----------
+const COMMON = `
+struct Params {
+  lidC: vec4f, lidN: vec4f,
+  n: u32, nx: u32, ny: u32, nz: u32,
+  cs: f32, rhoMean: f32, seed: u32, bounce: u32,
+  Tw0: f32, Ta: f32, Cw: f32, alphaWall: f32,
+  qWater: f32, latent: f32, buoy: f32, drag: f32,
+  noise: f32, kp: f32, kappa: f32, vmax: f32,
+  fanU: f32, fanY: f32, fanK: f32, fanPitch: f32,
+  dt: f32, sqDt: f32, dragF: f32, fanKd: f32,
+  kappaD: f32, vcap: f32, pad2: f32, pad3: f32,
+};
+struct State { Tw: f32, t: u32, Qwater: f32, QwallIn: f32, QwallOut: f32, fluxLid: f32, fluxSpout: f32, pad: f32 };
+
+const DOMX: f32 = ${F(DOM.X)}; const DOMY: f32 = ${F(DOM.Y)}; const DOMZ: f32 = ${F(DOM.Z)};
+const RB: f32 = ${F(K.Rb)}; const HB: f32 = ${F(K.Hb)}; const RO: f32 = ${F(K.Ro)}; const RIMY: f32 = ${F(K.rimY)};
+const WATERY: f32 = ${F(K.waterY)}; const RL: f32 = ${F(K.Rl)};
+const CONEA: f32 = ${K.coneA}; const CONEB: f32 = ${K.coneB};
+const SPR: f32 = ${F(K.spR)}; const SPLEN: f32 = ${F(K.spLen)};
+const SPP0: vec3f = vec3f(${F(K.spP0[0])}, ${F(K.spP0[1])}, 0.0);
+const SPD: vec3f = vec3f(${K.spD[0]}, ${K.spD[1]}, 0.0);
+const SPE2: vec3f = vec3f(${K.spE2[0]}, ${K.spE2[1]}, 0.0);
+const FANX: f32 = ${F(K.fanX)}; const FANR: f32 = ${F(K.fanR)}; const CSREF: f32 = ${F(CS_REF)}; const NREF: f32 = ${F(N_REF)};
+const DSCALE: f32 = 1024.0;   // fixed-point scale of the deposit grids
+const ASCALE: f32 = 256.0;    // fixed-point scale of the heat accumulators
+
+struct Corners { idx: array<u32, 8>, w: array<f32, 8> };
+
+fn corners(p: vec3f, nx: u32, ny: u32, nz: u32, cs: f32) -> Corners {
+  var c: Corners;
+  var fx = (p.x + DOMX) / cs - 0.5; var fy = p.y / cs - 0.5; var fz = (p.z + DOMZ) / cs - 0.5;
+  fx = clamp(fx, 0.0, f32(nx) - 1.001); fy = clamp(fy, 0.0, f32(ny) - 1.001); fz = clamp(fz, 0.0, f32(nz) - 1.001);
+  let ix = u32(fx); let iy = u32(fy); let iz = u32(fz);
+  let wx = fx - f32(ix); let wy = fy - f32(iy); let wz = fz - f32(iz);
+  let ix1 = select(0u, 1u, ix + 1u < nx); let iy1 = select(0u, nx, iy + 1u < ny); let iz1 = select(0u, nx * ny, iz + 1u < nz);
+  let base = (iz * ny + iy) * nx + ix;
+  c.idx[0] = base;             c.w[0] = (1.0 - wx) * (1.0 - wy) * (1.0 - wz);
+  c.idx[1] = base + ix1;       c.w[1] = wx * (1.0 - wy) * (1.0 - wz);
+  c.idx[2] = base + iy1;       c.w[2] = (1.0 - wx) * wy * (1.0 - wz);
+  c.idx[3] = base + ix1 + iy1; c.w[3] = wx * wy * (1.0 - wz);
+  c.idx[4] = base + iz1;             c.w[4] = (1.0 - wx) * (1.0 - wy) * wz;
+  c.idx[5] = base + ix1 + iz1;       c.w[5] = wx * (1.0 - wy) * wz;
+  c.idx[6] = base + iy1 + iz1;       c.w[6] = (1.0 - wx) * wy * wz;
+  c.idx[7] = base + ix1 + iy1 + iz1; c.w[7] = wx * wy * wz;
+  return c;
+}
+
+fn bodyR(y: f32) -> f32 { return select(CONEA + CONEB * y, RB, y <= HB); }
+
+fn isInside(p: vec3f) -> bool {
+  if (p.y < RIMY && p.y > WATERY - 1.0) {
+    let r = bodyR(p.y);
+    if (p.x * p.x + p.z * p.z < r * r) { return true; }
+  }
+  let q = p - SPP0;
+  let w = dot(q, SPD);
+  if (w >= 0.0 && w <= SPLEN) {
+    let v = dot(q, SPE2);
+    if (p.z * p.z + v * v < SPR * SPR) { return true; }
+  }
+  return false;
+}
+`;
+
+// ---------- kernels ----------
+const DEPOSIT = COMMON + `
+@group(0) @binding(0) var<uniform> P: Params;
+@group(0) @binding(1) var<storage, read> pos: array<vec4f>;
+@group(0) @binding(2) var<storage, read> vel: array<vec4f>;
+@group(0) @binding(3) var<storage, read> side: array<u32>;
+@group(0) @binding(4) var<storage, read_write> atomA: array<atomic<i32>>;
+@group(0) @binding(5) var<storage, read_write> atomB: array<atomic<i32>>;
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) g: vec3u) {
+  let i = g.x; if (i >= P.n) { return; }
+  let p = pos[i]; let Hm = vel[i].w; let sd = side[i];
+  var c = corners(p.xyz, P.nx, P.ny, P.nz, P.cs);
+  for (var k = 0u; k < 8u; k++) {
+    let b = 3u * c.idx[k]; let w = c.w[k];
+    let dr = i32(w * DSCALE + 0.5); let dT = i32(w * p.w * DSCALE + 0.5); let dH = i32(w * Hm * DSCALE + 0.5);
+    if (sd == 0u) { atomicAdd(&atomA[b], dr); atomicAdd(&atomA[b + 1u], dT); atomicAdd(&atomA[b + 2u], dH); }
+    else { atomicAdd(&atomB[b], dr); atomicAdd(&atomB[b + 1u], dT); atomicAdd(&atomB[b + 2u], dH); }
+  }
+}`;
+
+const FINALIZE1 = COMMON + `
+@group(0) @binding(0) var<uniform> P: Params;
+@group(0) @binding(1) var<storage, read_write> atomA: array<atomic<i32>>;
+@group(0) @binding(2) var<storage, read_write> atomB: array<atomic<i32>>;
+@group(0) @binding(3) var<storage, read_write> gridA: array<vec4f>;
+@group(0) @binding(4) var<storage, read_write> gridB: array<vec4f>;
+@group(0) @binding(5) var<storage, read_write> rho: array<f32>;
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) g: vec3u) {
+  let c = g.x; if (c >= P.nx * P.ny * P.nz) { return; }
+  let b = 3u * c;
+  let a = vec4f(f32(atomicLoad(&atomA[b])), f32(atomicLoad(&atomA[b + 1u])), f32(atomicLoad(&atomA[b + 2u])), 0.0) / DSCALE;
+  let bb = vec4f(f32(atomicLoad(&atomB[b])), f32(atomicLoad(&atomB[b + 1u])), f32(atomicLoad(&atomB[b + 2u])), 0.0) / DSCALE;
+  gridA[c] = a; gridB[c] = bb; rho[c] = a.x + bb.x;
+}`;
+
+// solid (water) cells take the mean density of their free neighbours
+const FINALIZE2 = COMMON + `
+@group(0) @binding(0) var<uniform> P: Params;
+@group(0) @binding(1) var<storage, read_write> rho: array<f32>;
+@group(0) @binding(2) var<storage, read> mask: array<u32>;
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) g: vec3u) {
+  let c = g.x; let nx = P.nx; let ny = P.ny; let nz = P.nz;
+  if (c >= nx * ny * nz) { return; }
+  if ((mask[c] & 1u) == 0u) { return; }
+  let ix = c % nx; let iy = (c / nx) % ny; let iz = c / (nx * ny);
+  var s = 0.0; var m = 0.0;
+  if (ix > 0u && (mask[c - 1u] & 1u) == 0u) { s += rho[c - 1u]; m += 1.0; }
+  if (ix + 1u < nx && (mask[c + 1u] & 1u) == 0u) { s += rho[c + 1u]; m += 1.0; }
+  if (iy > 0u && (mask[c - nx] & 1u) == 0u) { s += rho[c - nx]; m += 1.0; }
+  if (iy + 1u < ny && (mask[c + nx] & 1u) == 0u) { s += rho[c + nx]; m += 1.0; }
+  if (iz > 0u && (mask[c - nx * ny] & 1u) == 0u) { s += rho[c - nx * ny]; m += 1.0; }
+  if (iz + 1u < nz && (mask[c + nx * ny] & 1u) == 0u) { s += rho[c + nx * ny]; m += 1.0; }
+  rho[c] = select(P.rhoMean, s / m, m > 0.0);
+}`;
+
+const SMOOTH = COMMON + `
+@group(0) @binding(0) var<uniform> P: Params;
+@group(0) @binding(1) var<storage, read> rho: array<f32>;
+@group(0) @binding(2) var<storage, read_write> rhoSm: array<f32>;
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) g: vec3u) {
+  let c = g.x; let nx = P.nx; let ny = P.ny; let nz = P.nz;
+  if (c >= nx * ny * nz) { return; }
+  let ix = c % nx; let iy = (c / nx) % ny; let iz = c / (nx * ny);
+  let v = rho[c];
+  let xm = select(v, rho[c - 1u], ix > 0u); let xp = select(v, rho[c + 1u], ix + 1u < nx);
+  let ym = select(v, rho[c - nx], iy > 0u); let yp = select(v, rho[c + nx], iy + 1u < ny);
+  let zm = select(v, rho[c - nx * ny], iz > 0u); let zp = select(v, rho[c + nx * ny], iz + 1u < nz);
+  rhoSm[c] = (2.0 * v + xm + xp + ym + yp + zm + zp) / 8.0;
+}`;
+
+// central-difference gradient; no gradient across water, kettle shell, or the room boundary
+const GRADIENT = COMMON + `
+@group(0) @binding(0) var<uniform> P: Params;
+@group(0) @binding(1) var<storage, read> rhoSm: array<f32>;
+@group(0) @binding(2) var<storage, read> mask: array<u32>;
+@group(0) @binding(3) var<storage, read_write> grad: array<vec4f>;
+fn nb(c: u32, v: f32, ok: bool) -> f32 { return select(v, select(v, rhoSm[c], mask[c] == 0u), ok); }
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) g: vec3u) {
+  let c = g.x; let nx = P.nx; let ny = P.ny; let nz = P.nz;
+  if (c >= nx * ny * nz) { return; }
+  if ((mask[c] & 2u) != 0u) { grad[c] = vec4f(0.0); return; }
+  let ix = c % nx; let iy = (c / nx) % ny; let iz = c / (nx * ny);
+  let v = rhoSm[c];
+  let xm = nb(select(0u, c - 1u, ix > 0u), v, ix > 0u); let xp = nb(select(0u, c + 1u, ix + 1u < nx), v, ix + 1u < nx);
+  let ym = nb(select(0u, c - nx, iy > 0u), v, iy > 0u); let yp = nb(select(0u, c + nx, iy + 1u < ny), v, iy + 1u < ny);
+  let zm = nb(select(0u, c - nx * ny, iz > 0u), v, iz > 0u); let zp = nb(select(0u, c + nx * ny, iz + 1u < nz), v, iz + 1u < nz);
+  let gs = 0.5 * CSREF / P.cs;
+  grad[c] = vec4f((xp - xm) * gs, (yp - ym) * gs, (zp - zm) * gs, 0.0);
+}`;
+
+const STEP = COMMON + `
+@group(0) @binding(0) var<uniform> P: Params;
+@group(0) @binding(1) var<storage, read_write> pos: array<vec4f>;
+@group(0) @binding(2) var<storage, read_write> vel: array<vec4f>;
+@group(0) @binding(3) var<storage, read_write> side: array<u32>;
+@group(0) @binding(4) var<storage, read> grad: array<vec4f>;
+@group(0) @binding(5) var<storage, read> gridA: array<vec4f>;
+@group(0) @binding(6) var<storage, read> gridB: array<vec4f>;
+@group(0) @binding(7) var<storage, read_write> acc: array<atomic<i32>>;
+@group(0) @binding(8) var<storage, read> S: State;
+
+fn pcg(s: ptr<function, u32>) -> f32 {
+  *s = *s * 747796405u + 2891336453u;
+  let w = ((*s >> ((*s >> 28u) + 4u)) ^ *s) * 277803737u;
+  return f32((w >> 22u) ^ w) / 4294967296.0;
+}
+fn hash(x: u32) -> u32 { var h = x; h ^= h >> 16u; h *= 0x7feb352du; h ^= h >> 15u; h *= 0x846ca68bu; h ^= h >> 16u; return h; }
+fn gauss2(s: ptr<function, u32>) -> vec2f {
+  let u1 = max(pcg(s), 1e-7); let u2 = pcg(s);
+  let r = sqrt(-2.0 * log(u1)); let th = 6.2831853 * u2;
+  return vec2f(r * cos(th), r * sin(th));
+}
+fn fanAxis() -> vec3f { return vec3f(cos(P.fanPitch), -sin(P.fanPitch), 0.0); }
+fn wind(p: vec3f, u: vec3f) -> f32 {
+  let r = p - vec3f(FANX, P.fanY, 0.0);
+  let d = dot(r, u);
+  if (P.fanU <= 0.0 || d <= 0.0) { return 0.0; }
+  let D = 2.0 * FANR; let b = FANR + 0.11 * d;
+  let q = r - d * u; let r2 = dot(q, q) / (b * b);
+  if (r2 >= 1.0) { return 0.0; }
+  let uc = select(5.0 * D / d, 1.0, d < 5.0 * D);
+  return P.fanU * uc * (1.0 - r2);
+}
+struct Hit { t: f32, n: vec3f, kind: u32, id: u32, ok: bool };
+// kind: 0 adiabatic, 1 water, 2 wall(conductive)
+fn nearestHit(a: vec3f, b: vec3f, skip: u32) -> Hit {
+  var h: Hit; h.t = 2.0; h.ok = false; h.kind = 0u; h.id = 0u; h.n = vec3f(0.0, 1.0, 0.0);
+  let d = b - a;
+  if (skip != 1u && b.y < 0.0 && a.y >= 0.0) { let t = a.y / (a.y - b.y); if (t < h.t) { h.t = t; h.kind = 0u; h.id = 1u; h.n = vec3f(0.0, 1.0, 0.0); } }
+  let near = (a.x * a.x + a.z * a.z < 25600.0 || b.x * b.x + b.z * b.z < 25600.0) && (a.y < RIMY + 60.0 || b.y < RIMY + 60.0);
+  if (near) {
+    // body cylinder
+    if (skip != 2u) {
+      let qa = d.x * d.x + d.z * d.z; let qb = 2.0 * (a.x * d.x + a.z * d.z); let qc = a.x * a.x + a.z * a.z - RB * RB;
+      if (qa > 1e-12) {
+        let disc = qb * qb - 4.0 * qa * qc;
+        if (disc >= 0.0) {
+          let sq = sqrt(disc);
+          for (var k = 0u; k < 2u; k++) {
+            let t = select(-qb + sq, -qb - sq, k == 0u) / (2.0 * qa);
+            if (t > 0.0 && t <= 1.0 && t < h.t) {
+              let hp = a + d * t;
+              if (hp.y >= 0.0 && hp.y <= HB) {
+                let q = hp - SPP0; let w = dot(q, SPD); let v = dot(q, SPE2);
+                if (!(w > -14.0 && w < 14.0 && hp.z * hp.z + v * v < SPR * SPR)) {
+                  h.t = t; h.kind = 2u; h.id = 2u; h.n = vec3f(hp.x / RB, 0.0, hp.z / RB);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    // conical shoulder
+    if (skip != 3u) {
+      let r0 = CONEA + CONEB * a.y;
+      let qa = d.x * d.x + d.z * d.z - CONEB * CONEB * d.y * d.y;
+      let qb = 2.0 * (a.x * d.x + a.z * d.z) - 2.0 * CONEB * d.y * r0;
+      let qc = a.x * a.x + a.z * a.z - r0 * r0;
+      if (abs(qa) > 1e-12) {
+        let disc = qb * qb - 4.0 * qa * qc;
+        if (disc >= 0.0) {
+          let sq = sqrt(disc);
+          for (var k = 0u; k < 2u; k++) {
+            let t = select(-qb + sq, -qb - sq, k == 0u) / (2.0 * qa);
+            if (t > 0.0 && t <= 1.0 && t < h.t) {
+              let hp = a + d * t;
+              if (hp.y >= HB && hp.y <= RIMY) {
+                let rr = CONEA + CONEB * hp.y;
+                h.t = t; h.kind = 2u; h.id = 3u; h.n = normalize(vec3f(hp.x, -CONEB * rr, hp.z));
+              }
+            }
+          }
+        }
+      }
+    }
+    // water surface
+    if (skip != 4u && a.y > WATERY && b.y <= WATERY) {
+      let t = (a.y - WATERY) / (a.y - b.y);
+      if (t < h.t) { let hp = a + d * t; if (hp.x * hp.x + hp.z * hp.z <= RB * RB) { h.t = t; h.kind = 1u; h.id = 4u; h.n = vec3f(0.0, 1.0, 0.0); } }
+    }
+    // lid disc
+    if (skip != 5u) {
+      let C = P.lidC.xyz; let N = P.lidN.xyz;
+      let s0 = dot(a - C, N); let s1 = dot(b - C, N);
+      if ((s0 > 0.0 && s1 <= 0.0) || (s0 < 0.0 && s1 >= 0.0)) {
+        let t = s0 / (s0 - s1);
+        if (t < h.t) { let hp = a + d * t - C; if (dot(hp, hp) <= RL * RL) { h.t = t; h.kind = 0u; h.id = 5u; h.n = N; } }
+      }
+    }
+    // spout tube
+    if (skip != 6u) {
+      let q = a - SPP0;
+      let u0 = a.z; let v0 = dot(q, SPE2); let w0 = dot(q, SPD);
+      let du = d.z; let dv = dot(d, SPE2); let dw = dot(d, SPD);
+      let qa = du * du + dv * dv; let qb = 2.0 * (u0 * du + v0 * dv); let qc = u0 * u0 + v0 * v0 - SPR * SPR;
+      if (qa > 1e-12 && (w0 > -10.0 || w0 + dw > -10.0)) {
+        let disc = qb * qb - 4.0 * qa * qc;
+        if (disc >= 0.0) {
+          let sq = sqrt(disc);
+          for (var k = 0u; k < 2u; k++) {
+            let t = select(-qb + sq, -qb - sq, k == 0u) / (2.0 * qa);
+            if (t > 0.0 && t <= 1.0 && t < h.t) {
+              let hw = w0 + dw * t;
+              if (hw >= 0.0 && hw <= SPLEN) {
+                let hu = (u0 + du * t) / SPR; let hv = (v0 + dv * t) / SPR;
+                h.t = t; h.kind = 2u; h.id = 6u; h.n = vec3f(hv * SPE2.x, hv * SPE2.y, hu);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  h.ok = h.t <= 1.0;
+  return h;
+}
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) g: vec3u) {
+  let i = g.x; if (i >= P.n) { return; }
+  let p0 = pos[i]; let v0 = vel[i]; let sdOld = side[i];
+  var x = p0.x; var y = p0.y; var z = p0.z; var T = p0.w;
+  var vx = v0.x; var vy = v0.y; var vz = v0.z; var Hm = v0.w;
+  let Tw = S.Tw; let Ta = P.Ta;
+  var rs = hash(P.seed ^ (i * 0x9E3779B9u) ^ (S.t * 0x85EBCA77u) ^ 0x1234567u);
+  var cc = corners(vec3f(x, y, z), P.nx, P.ny, P.nz, P.cs);
+  var a = vec3f(0.0);
+  for (var k = 0u; k < 8u; k++) { a += grad[cc.idx[k]].xyz * cc.w[k]; }
+  let Tn = max((T - Ta) / (P.Tw0 - Ta), 0.0);
+  if (sdOld == 0u && P.fanU > 0.0) {
+    let ax = fanAxis(); let u = wind(vec3f(x, y, z), ax);
+    if (u > 0.02) { let dv = P.fanKd * (u - (vx * ax.x + vy * ax.y)); vx += dv * ax.x; vy += dv * ax.y; }
+  }
+  let g1 = gauss2(&rs); let g2 = gauss2(&rs);
+  vx += P.dt * (-P.kp * a.x / P.rhoMean) + P.sqDt * P.noise * g1.x;
+  vy += P.dt * (-P.kp * a.y / P.rhoMean + P.buoy * Tn) + P.sqDt * P.noise * g1.y;
+  vz += P.dt * (-P.kp * a.z / P.rhoMean) + P.sqDt * P.noise * g2.x;
+  vx *= P.dragF; vy *= P.dragF; vz *= P.dragF;
+  let sp2 = vx * vx + vy * vy + vz * vz;
+  if (sp2 > P.vcap * P.vcap) { let f = P.vcap / sqrt(sp2); vx *= f; vy *= f; vz *= f; }
+
+  let x0 = x; let y0 = y; let z0 = z;
+  var s = vec3f(x, y, z); var e = vec3f(x + vx * P.dt, y + vy * P.dt, z + vz * P.dt); var skip = 0u;
+  var dQw = 0.0; var dQin = 0.0; var dQout = 0.0;
+  for (var it = 0u; it < 3u; it++) {
+    let h = nearestHit(s, e, skip);
+    if (!h.ok) { break; }
+    let X = s + (e - s) * h.t;
+    let vn = vx * h.n.x + vy * h.n.y + vz * h.n.z;
+    let sgn = select(-1.0, 1.0, vn < 0.0);
+    let r = e - X; let rn = dot(r, h.n);
+    if (P.bounce == 0u) {
+      e = X + r - 2.0 * rn * h.n + sgn * 0.05 * h.n;
+      vx -= 2.0 * vn * h.n.x; vy -= 2.0 * vn * h.n.y; vz -= 2.0 * vn * h.n.z;
+    } else {
+      let keep = select(1.0, 0.5, P.bounce == 2u);
+      e = X + (r - rn * h.n) * keep + sgn * 0.05 * h.n;
+      vx = (vx - vn * h.n.x) * keep; vy = (vy - vn * h.n.y) * keep; vz = (vz - vn * h.n.z) * keep;
+    }
+    if (h.kind == 1u) {
+      let dT = P.qWater * (Tw - T); let hs = P.latent * (Tw - Ta);
+      let dH = max(P.qWater * (hs - Hm), 0.0);
+      T += dT; Hm += dH; dQw += dT + dH;
+    } else if (h.kind == 2u) {
+      let dd = P.alphaWall * (Tw - T); T += dd;
+      if (sdOld == 1u) { dQin += dd; } else { dQout += dd; }
+    }
+    s = X + sgn * 0.05 * h.n; skip = h.id;
+  }
+  x = e.x; y = e.y; z = e.z;
+  if (x < -DOMX) { x = -2.0 * DOMX - x; vx = -vx; T = Ta; Hm = 0.0; }
+  else if (x > DOMX) { x = 2.0 * DOMX - x; vx = -vx; T = Ta; Hm = 0.0; }
+  if (z < -DOMZ) { z = -2.0 * DOMZ - z; vz = -vz; T = Ta; Hm = 0.0; }
+  else if (z > DOMZ) { z = 2.0 * DOMZ - z; vz = -vz; T = Ta; Hm = 0.0; }
+  if (y > DOMY) { y = 2.0 * DOMY - y; vy = -vy; T = Ta; Hm = 0.0; }
+  if (y < 0.5) { y = 0.5; vy = abs(vy); }
+  if (y < WATERY && x * x + z * z < RB * RB) { y = WATERY + 1.0; vy = abs(vy); }
+
+  // enthalpy flux through the opening and the spout tip (positive = leaving)
+  let Tex = T - Ta + Hm;
+  if ((y0 > RIMY) != (y > RIMY)) {
+    let f = (RIMY - y0) / (y - y0); let cx = x0 + (x - x0) * f; let cz = z0 + (z - z0) * f;
+    if (cx * cx + cz * cz <= RO * RO) { atomicAdd(&acc[3], i32(select(-1.0, 1.0, y > y0) * Tex * ASCALE)); }
+  }
+  {
+    let w0 = dot(vec3f(x0, y0, z0) - SPP0, SPD); let w1 = dot(vec3f(x, y, z) - SPP0, SPD);
+    if ((w0 > SPLEN) != (w1 > SPLEN)) {
+      let f = (SPLEN - w0) / (w1 - w0);
+      let cp = vec3f(x0, y0, z0) + (vec3f(x, y, z) - vec3f(x0, y0, z0)) * f;
+      let v = dot(cp - SPP0, SPE2);
+      if (v * v + cp.z * cp.z <= SPR * SPR) { atomicAdd(&acc[4], i32(select(-1.0, 1.0, w1 > w0) * Tex * ASCALE)); }
+    }
+  }
+  // mixing with neighbouring parcels on the same side of the wall
+  let sdNew = select(0u, 1u, isInside(vec3f(x, y, z)));
+  var c2 = corners(vec3f(x, y, z), P.nx, P.ny, P.nz, P.cs);
+  var sum = vec4f(0.0);
+  if (sdNew == 0u) { for (var k = 0u; k < 8u; k++) { sum += gridA[c2.idx[k]] * c2.w[k]; } }
+  else { for (var k = 0u; k < 8u; k++) { sum += gridB[c2.idx[k]] * c2.w[k]; } }
+  if (sum.x > 1e-4) { T += P.kappaD * (sum.y / sum.x - T); Hm += P.kappaD * (sum.z / sum.x - Hm); }
+
+  if (dQw != 0.0) { atomicAdd(&acc[0], i32(dQw * ASCALE)); }
+  if (dQin != 0.0) { atomicAdd(&acc[1], i32(dQin * ASCALE)); }
+  if (dQout != 0.0) { atomicAdd(&acc[2], i32(dQout * ASCALE)); }
+  pos[i] = vec4f(x, y, z, T); vel[i] = vec4f(vx, vy, vz, Hm); side[i] = sdNew;
+}`;
+
+const APPLY = COMMON + `
+@group(0) @binding(0) var<uniform> P: Params;
+@group(0) @binding(1) var<storage, read_write> acc: array<atomic<i32>>;
+@group(0) @binding(2) var<storage, read_write> S: State;
+@compute @workgroup_size(1)
+fn main() {
+  let qw = f32(atomicExchange(&acc[0], 0)) / ASCALE;
+  let qi = f32(atomicExchange(&acc[1], 0)) / ASCALE;
+  let qo = f32(atomicExchange(&acc[2], 0)) / ASCALE;
+  let fl = f32(atomicExchange(&acc[3], 0)) / ASCALE;
+  let fs = f32(atomicExchange(&acc[4], 0)) / ASCALE;
+  S.Tw = S.Tw - (qw + qi + qo) / (P.Cw * f32(P.n) / NREF);
+  S.Qwater += qw; S.QwallIn += qi; S.QwallOut += qo; S.fluxLid += fl; S.fluxSpout += fs;
+  S.t = S.t + 1u;
+}`;
+
+const SOURCES = { DEPOSIT, FINALIZE1, FINALIZE2, SMOOTH, GRADIENT, STEP, APPLY };
+
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+class GpuSim3D {
+  static async create(params) {
+    if (!navigator.gpu) throw new Error('no WebGPU');
+    const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+    if (!adapter) throw new Error('no adapter');
+    const device = await adapter.requestDevice();
+    const sim = new GpuSim3D(device, adapter, params);
+    await sim.build();
+    return sim;
+  }
+  constructor(device, adapter, params) {
+    this.device = device; this.adapter = adapter;
+    this.p = Object.assign({}, DEFAULTS, params || {});
+    this.angle = 0; this.t = 0; this.Tw = this.p.Tw0; this.lidC = [0, 0, 0]; this.lidN = [0, 1, 0];
+    this.Qwater = 0; this.QwallIn = 0; this.QwallOut = 0; this.fluxLid = 0; this.fluxSpout = 0;
+    this.hist = [[0, this.p.Tw0]];
+    this.lost = null;
+    device.lost.then((info) => { this.lost = info; });
+    let name = 'WebGPU';
+    try { if (adapter.info) name = [adapter.info.vendor, adapter.info.architecture || adapter.info.device].filter(Boolean).join(' ') || name; } catch (e) { /* no info */ }
+    this.name = name;
+  }
+  async build() {
+    const dev = this.device;
+    this.pipes = {};
+    for (const key in SOURCES) {
+      const mod = dev.createShaderModule({ code: SOURCES[key] });
+      const info = await mod.getCompilationInfo();
+      const errs = info.messages.filter((m) => m.type === 'error');
+      if (errs.length) throw new Error(key + ': ' + errs.map((m) => `L${m.lineNum}: ${m.message}`).join(' | '));
+      this.pipes[key] = dev.createComputePipeline({ layout: 'auto', compute: { module: mod, entryPoint: 'main' } });
+    }
+    this.alloc();
+    this.setAngle(0);
+    this.reset(this.p.seed);
+  }
+  alloc() {
+    const dev = this.device, p = this.p;
+    const n = this.n = p.n, cs = this.cs = p.cs;
+    this.nx = Math.ceil(2 * DOM.X / cs); this.ny = Math.ceil(DOM.Y / cs); this.nz = Math.ceil(2 * DOM.Z / cs);
+    const cells = this.cells = this.nx * this.ny * this.nz;
+    if (this.bufs) for (const k in this.bufs) this.bufs[k].destroy();
+    const B = (size, usage) => dev.createBuffer({ size: Math.max(16, Math.ceil(size / 16) * 16), usage });
+    const ST = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC;
+    this.bufs = {
+      params: dev.createBuffer({ size: 256, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }),
+      pos: B(n * 16, ST), vel: B(n * 16, ST), side: B(n * 4, ST),
+      atomA: B(cells * 12, ST), atomB: B(cells * 12, ST),
+      gridA: B(cells * 16, ST), gridB: B(cells * 16, ST),
+      rho: B(cells * 4, ST), rhoSm: B(cells * 4, ST), grad: B(cells * 16, ST), mask: B(cells * 4, ST),
+      acc: B(32, ST), state: B(32, ST),
+      stagePos: dev.createBuffer({ size: n * 16, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST }),
+      stageState: dev.createBuffer({ size: 32, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST }),
+    };
+    // masks: bit0 water (solid), bit1 kettle shell (pressure barrier)
+    const mask = new Uint32Array(cells); let free = 0;
+    for (let iz = 0; iz < this.nz; iz++) for (let iy = 0; iy < this.ny; iy++) for (let ix = 0; ix < this.nx; ix++) {
+      const x = (ix + 0.5) * cs - DOM.X, y = (iy + 0.5) * cs, z = (iz + 0.5) * cs - DOM.Z;
+      const r = Math.sqrt(x * x + z * z), c = (iz * this.ny + iy) * this.nx + ix;
+      const s = (y < K.waterY && r < K.Rb);
+      const bodyR = y <= K.Hb ? K.Rb : K.coneA + K.coneB * y;
+      let m = 0; if (s) m |= 1; else if (y <= K.rimY && Math.abs(r - bodyR) <= cs * 0.5) m |= 2;
+      mask[c] = m; if (!s) free++;
+    }
+    this.freeCells = free;
+    dev.queue.writeBuffer(this.bufs.mask, 0, mask);
+    const b = this.bufs, P = this.pipes;
+    const bg = (pipe, list) => dev.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries: list.map((buf, i) => ({ binding: i, resource: { buffer: buf } })) });
+    this.bgs = {
+      DEPOSIT: bg(P.DEPOSIT, [b.params, b.pos, b.vel, b.side, b.atomA, b.atomB]),
+      FINALIZE1: bg(P.FINALIZE1, [b.params, b.atomA, b.atomB, b.gridA, b.gridB, b.rho]),
+      FINALIZE2: bg(P.FINALIZE2, [b.params, b.rho, b.mask]),
+      SMOOTH: bg(P.SMOOTH, [b.params, b.rho, b.rhoSm]),
+      GRADIENT: bg(P.GRADIENT, [b.params, b.rhoSm, b.mask, b.grad]),
+      STEP: bg(P.STEP, [b.params, b.pos, b.vel, b.side, b.grad, b.gridA, b.gridB, b.acc, b.state]),
+      APPLY: bg(P.APPLY, [b.params, b.acc, b.state]),
+    };
+    this.posT = new Float32Array(n * 4);
+    this.writeParams();
+  }
+  writeParams() {
+    const p = this.p, f = new Float32Array(64), u = new Uint32Array(f.buffer);
+    f.set(this.lidC, 0); f[3] = 0; f.set(this.lidN, 4); f[7] = 0;
+    u[8] = this.n; u[9] = this.nx; u[10] = this.ny; u[11] = this.nz;
+    f[12] = this.cs; f[13] = this.n / this.freeCells; u[14] = p.seed >>> 0; u[15] = (p.bounce | 0) >>> 0;
+    f[16] = p.Tw0; f[17] = p.Ta; f[18] = p.Cw; f[19] = p.alphaWall;
+    f[20] = p.qWater; f[21] = p.latent; f[22] = p.buoy; f[23] = p.drag;
+    f[24] = p.noise; f[25] = p.kp; f[26] = p.kappa; f[27] = p.vmax;
+    f[28] = p.fanU; f[29] = p.fanY; f[30] = p.fanK; f[31] = (p.fanPitch || 0) * Math.PI / 180;
+    const dt = this.dt = Math.min(1, p.vmax / Math.max(p.fanU, 1e-9));
+    f[32] = dt; f[33] = Math.sqrt(dt); f[34] = Math.pow(1 - p.drag, dt); f[35] = 1 - Math.pow(1 - p.fanK, dt);
+    f[36] = 1 - Math.pow(1 - p.kappa, dt); f[37] = p.vmax / dt; f[38] = 0; f[39] = 0;
+    this.device.queue.writeBuffer(this.bufs.params, 0, f);
+  }
+  setParams(q) {
+    const needAlloc = (q.n !== undefined && q.n !== this.p.n) || (q.cs !== undefined && q.cs !== this.p.cs);
+    Object.assign(this.p, q);
+    if (needAlloc) { this.alloc(); this.setAngle(this.angle); this.reset(this.p.seed); }
+    else this.writeParams();
+  }
+  setAngle(deg) {
+    this.angle = deg;
+    const a = deg * Math.PI / 180, s = this.p.hinge === 'near' ? -1 : 1;
+    const dx = -s * Math.cos(a), dy = Math.sin(a);
+    this.lidC = [s * K.Ro + K.Rl * dx, K.rimY + K.Rl * dy, 0];
+    this.lidN = [s * Math.sin(a), Math.cos(a), 0];
+    if (this.bufs) this.writeParams();
+  }
+  reset(seed) {
+    const p = this.p, n = this.n;
+    if (seed !== undefined) p.seed = seed;
+    const rng = mulberry32(p.seed);
+    const pos = new Float32Array(n * 4), vel = new Float32Array(n * 4), side = new Uint32Array(n);
+    for (let i = 0; i < n; i++) {
+      let x, y, z;
+      for (;;) {
+        x = (rng() * 2 - 1) * DOM.X; y = rng() * (DOM.Y - 2) + 1; z = (rng() * 2 - 1) * DOM.Z;
+        if (y < K.waterY + 1 && x * x + z * z < (K.Rb + 2) * (K.Rb + 2)) continue;
+        break;
+      }
+      const inside = isInside(x, y, z);
+      pos[4 * i] = x; pos[4 * i + 1] = y; pos[4 * i + 2] = z; pos[4 * i + 3] = inside ? p.Tw0 : p.Ta;
+      vel[4 * i + 3] = inside ? p.latent * (p.Tw0 - p.Ta) : 0;
+      side[i] = inside ? 1 : 0;
+    }
+    const q = this.device.queue;
+    q.writeBuffer(this.bufs.pos, 0, pos); q.writeBuffer(this.bufs.vel, 0, vel); q.writeBuffer(this.bufs.side, 0, side);
+    const st = new Float32Array(8); st[0] = p.Tw0; q.writeBuffer(this.bufs.state, 0, st);
+    q.writeBuffer(this.bufs.acc, 0, new Int32Array(8));
+    this.posT.set(pos);
+    this.t = 0; this.Tw = p.Tw0; this.Qwater = 0; this.QwallIn = 0; this.QwallOut = 0; this.fluxLid = 0; this.fluxSpout = 0;
+    this.hist = [[0, p.Tw0]];
+    this.writeParams();
+  }
+  // enqueue k steps, then read back positions (first readN particles) and the state
+  async run(k, readN) {
+    const dev = this.device, b = this.bufs, P = this.pipes, G = this.bgs;
+    const enc = dev.createCommandEncoder();
+    const wgP = Math.ceil(this.n / 256), wgC = Math.ceil(this.cells / 256);
+    for (let s = 0; s < k; s++) {
+      enc.clearBuffer(b.atomA); enc.clearBuffer(b.atomB);
+      const pass = enc.beginComputePass();
+      pass.setPipeline(P.DEPOSIT); pass.setBindGroup(0, G.DEPOSIT); pass.dispatchWorkgroups(wgP);
+      pass.setPipeline(P.FINALIZE1); pass.setBindGroup(0, G.FINALIZE1); pass.dispatchWorkgroups(wgC);
+      pass.setPipeline(P.FINALIZE2); pass.setBindGroup(0, G.FINALIZE2); pass.dispatchWorkgroups(wgC);
+      pass.setPipeline(P.SMOOTH); pass.setBindGroup(0, G.SMOOTH); pass.dispatchWorkgroups(wgC);
+      pass.setPipeline(P.GRADIENT); pass.setBindGroup(0, G.GRADIENT); pass.dispatchWorkgroups(wgC);
+      pass.setPipeline(P.STEP); pass.setBindGroup(0, G.STEP); pass.dispatchWorkgroups(wgP);
+      pass.setPipeline(P.APPLY); pass.setBindGroup(0, G.APPLY); pass.dispatchWorkgroups(1);
+      pass.end();
+    }
+    const rn = Math.min(readN || this.n, this.n);
+    enc.copyBufferToBuffer(b.pos, 0, b.stagePos, 0, rn * 16);
+    enc.copyBufferToBuffer(b.state, 0, b.stageState, 0, 32);
+    dev.queue.submit([enc.finish()]);
+    await Promise.all([b.stagePos.mapAsync(GPUMapMode.READ, 0, rn * 16), b.stageState.mapAsync(GPUMapMode.READ)]);
+    this.posT.set(new Float32Array(b.stagePos.getMappedRange(0, rn * 16)));
+    const st = new Float32Array(b.stageState.getMappedRange().slice(0)), su = new Uint32Array(st.buffer);
+    b.stagePos.unmap(); b.stageState.unmap();
+    this.Tw = st[0]; this.t = su[1]; this.Qwater = st[2]; this.QwallIn = st[3]; this.QwallOut = st[4]; this.fluxLid = st[5]; this.fluxSpout = st[6];
+    this.hist.push([this.t, this.Tw]);
+    if (this.lost) throw new Error('device lost: ' + this.lost.message);
+  }
+  summary() {
+    const p = this.p, dT = p.Tw0 - this.Tw;
+    const inner = this.Qwater + this.QwallIn;
+    const fl = Math.max(0, this.fluxLid), fs = Math.max(0, this.fluxSpout), fsum = fl + fs;
+    return { angle: this.angle, steps: this.t, Tw: this.Tw, dT, total: dT * p.Cw * this.n / N_REF,
+      lid: fsum > 0 ? inner * fl / fsum : 0, spout: fsum > 0 ? inner * fs / fsum : 0,
+      wallOut: this.QwallOut, Qwater: this.Qwater, QwallIn: this.QwallIn };
+  }
+}
+
+root.KettleGpu3D = { GpuSim3D, SOURCES };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+(function () {
+'use strict';
+const { KettleSim3D, SCAN_SETS, K, DOM } = window.KettleCore3D;
+const { GpuSim3D } = window.KettleGpu3D;
+const $ = (id) => document.getElementById(id);
+
+const SEED = 1234;
+const SEEDS = [1234, 5678, 9012];
+let seedCount = 1;
+const PRESETS = {
+  gpu: {
+    fast:     { n: 100000, cs: 12, steps: 1200, set: 'fast',     label: '快速 · 7 个开度 · 10 万微团 · 网格 12' },
+    standard: { n: 200000, cs: 10, steps: 1500, set: 'standard', label: '标准 · 10 个开度 · 20 万微团 · 网格 10' },
+    fine:     { n: 400000, cs: 8,  steps: 2000, set: 'fine',     label: '精细 · 12 个开度 · 40 万微团 · 网格 8' },
+  },
+  cpu: {
+    fast:     { n: 6000,  cs: 20, steps: 900,  set: 'fast',     label: '快速 · 7 个开度 · 6000 微团 · 网格 20' },
+    standard: { n: 10000, cs: 20, steps: 1500, set: 'standard', label: '标准 · 10 个开度 · 1 万微团 · 网格 20' },
+    fine:     { n: 14000, cs: 20, steps: 2100, set: 'fine',     label: '精细 · 12 个开度 · 1.4 万微团 · 网格 20' },
+  },
+};
+const DISPLAY_MAX = 150000;
+const params = { alphaWall: 0.1, latent: 4, buoy: 0.15, noise: 0.2, kp: 4, Cw: 20000, fanU: 2.5, fanY: 270, fanPitch: 0, bounce: 0, hinge: 'far' };
+let quality = 'standard', mode = 'cpu', backend = null, backendName = 'CPU';
+let playing = true, liveMode = 3, busy = false, scan = null, results = [], lastStatus = '', msPerStep = 8;
+
+// ---------- CPU backend (same interface as the GPU one) ----------
+class CpuBackend {
+  constructor(p) { this.sim = new KettleSim3D(p); this.name = 'CPU'; this.posT = new Float32Array(this.sim.n * 4); this.hist = [[0, this.sim.p.Tw0]]; this.fill(); }
+  get n() { return this.sim.n; } get p() { return this.sim.p; } get angle() { return this.sim.angle; } get t() { return this.sim.t; } get Tw() { return this.sim.Tw; }
+  get cs() { return this.sim.cs; } get cells() { return this.sim.nx * this.sim.ny * this.sim.nz; }
+  reset(seed) { this.sim.reset(seed); this.hist = [[0, this.sim.p.Tw0]]; this.fill(); }
+  setAngle(d) { this.sim.setAngle(d); }
+  setParams(q) { this.sim.setParams(q); if (this.posT.length !== this.sim.n * 4) this.posT = new Float32Array(this.sim.n * 4); this.hist = [[0, this.sim.p.Tw0]]; this.fill(); }
+  summary() { return this.sim.summary(); }
+  fill(readN) { const s = this.sim, m = Math.min(readN || s.n, s.n), a = this.posT; for (let i = 0; i < m; i++) { a[4 * i] = s.px[i]; a[4 * i + 1] = s.py[i]; a[4 * i + 2] = s.pz[i]; a[4 * i + 3] = s.T[i]; } }
+  async run(k, readN, budgetMs) {
+    const t0 = performance.now(); let done = 0;
+    while (done < k) { this.sim.step(); done++; if (performance.now() - t0 > budgetMs) break; }
+    this.hist.push([this.sim.t, this.sim.Tw]); this.fill(readN);
+  }
+}
+
+// ---------- theme ----------
+let css = {};
+function readCss() {
+  const s = getComputedStyle(document.documentElement), g = (k) => s.getPropertyValue(k).trim();
+  css = { scene: g('--scene'), steel: g('--steel'), steelDk: g('--steel-dk'), water: g('--water'), wood: g('--wood'),
+          hot: g('--hot'), hot2: g('--hot2'), cold: g('--cold'), ink: g('--ink'), muted: g('--muted'), line: g('--line') };
+  if (window.applyTheme) window.applyTheme();
+}
+readCss();
+const mq = window.matchMedia('(prefers-color-scheme: dark)');
+if (mq.addEventListener) mq.addEventListener('change', readCss);
+new MutationObserver(readCss).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+// ---------- three.js scene ----------
+const canvas = $('scene');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(38, 4 / 3, 10, 4000);
+const orbit = { theta: 0.62, phi: 1.12, radius: 900, target: new THREE.Vector3(-20, 150, 0) };
+function placeCamera() {
+  const sp = Math.sin(orbit.phi), cp = Math.cos(orbit.phi);
+  camera.position.set(orbit.target.x + orbit.radius * sp * Math.sin(orbit.theta), orbit.target.y + orbit.radius * cp, orbit.target.z + orbit.radius * sp * Math.cos(orbit.theta));
+  camera.lookAt(orbit.target);
+}
+placeCamera();
+scene.add(new THREE.HemisphereLight(0xffffff, 0x556677, 0.95));
+const sun = new THREE.DirectionalLight(0xffffff, 0.75); sun.position.set(300, 600, 250); scene.add(sun);
+const steelMat = new THREE.MeshStandardMaterial({ color: 0xb8c1c9, metalness: 0.85, roughness: 0.35, transparent: true, opacity: 0.32, side: THREE.DoubleSide, depthWrite: false });
+const lidMat = new THREE.MeshStandardMaterial({ color: 0xc4ccd3, metalness: 0.85, roughness: 0.3, transparent: true, opacity: 0.85, side: THREE.DoubleSide });
+const spoutMat = new THREE.MeshStandardMaterial({ color: 0xb8c1c9, metalness: 0.85, roughness: 0.35, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false });
+const darkMat = new THREE.MeshStandardMaterial({ color: 0x1d1f22, metalness: 0.2, roughness: 0.7 });
+const waterMat = new THREE.MeshStandardMaterial({ color: 0x3c8fd6, metalness: 0.1, roughness: 0.4, transparent: true, opacity: 0.82 });
+const deskMat = new THREE.MeshLambertMaterial({ color: 0xc9ab83 });
+const jetMat = new THREE.MeshBasicMaterial({ color: 0x2a7ccf, transparent: true, opacity: 0.07, side: THREE.DoubleSide, depthWrite: false });
+const ringMat = new THREE.LineBasicMaterial({ color: 0x5e6c79 });
+const plainMat = new THREE.MeshStandardMaterial({ color: 0xd8dde2, metalness: 0.2, roughness: 0.6 });
+const desk = new THREE.Mesh(new THREE.PlaneGeometry(2 * DOM.X, 2 * DOM.Z), deskMat); desk.rotation.x = -Math.PI / 2; scene.add(desk);
+const base = new THREE.Mesh(new THREE.CylinderGeometry(K.Rb + 2, K.Rb + 2, K.baseH, 48), darkMat); base.position.y = K.baseH / 2; scene.add(base);
+const waterBody = new THREE.Mesh(new THREE.CylinderGeometry(K.Rb - 1, K.Rb - 1, K.waterY - K.baseH, 48), waterMat); waterBody.position.y = (K.waterY + K.baseH) / 2; scene.add(waterBody);
+const body = new THREE.Mesh(new THREE.CylinderGeometry(K.Rb, K.Rb, K.Hb, 64, 1, true), steelMat); body.position.y = K.Hb / 2; scene.add(body);
+const shoulder = new THREE.Mesh(new THREE.CylinderGeometry(K.Ro, K.Rb, K.rimY - K.Hb, 64, 1, true), steelMat); shoulder.position.y = (K.rimY + K.Hb) / 2; scene.add(shoulder);
+const spout = new THREE.Mesh(new THREE.CylinderGeometry(K.spR, K.spR, K.spLen, 24, 1, true), spoutMat);
+spout.position.set((K.spP0[0] + K.spP1[0]) / 2, (K.spP0[1] + K.spP1[1]) / 2, 0);
+spout.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(K.spD[0], K.spD[1], 0));
+scene.add(spout);
+const lidGroup = new THREE.Group();
+const lidDisc = new THREE.Mesh(new THREE.CylinderGeometry(K.Rl, K.Rl, 3, 48), lidMat);
+const knob = new THREE.Mesh(new THREE.SphereGeometry(7, 20, 14), darkMat); knob.position.y = 9;
+const lidInner = new THREE.Group(); lidInner.add(lidDisc); lidInner.add(knob); lidGroup.add(lidInner); scene.add(lidGroup);
+function ring(r, segs) { const pts = []; for (let i = 0; i < segs; i++) { const a = i / segs * Math.PI * 2; pts.push(new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r)); } return new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts), ringMat); }
+const rimRing = ring(K.Ro, 64); rimRing.position.y = K.rimY + 0.3; scene.add(rimRing);
+const tipRing = ring(K.spR, 32); tipRing.position.set(K.spP1[0], K.spP1[1], 0); tipRing.quaternion.copy(spout.quaternion); scene.add(tipRing);
+const fanGroup = new THREE.Group();          // whole fan: positioned at (fanX, fanY)
+const fanRig = new THREE.Group();            // head + jet: tilts with the pitch
+fanGroup.add(fanRig);
+fanRig.add(new THREE.Mesh(new THREE.TorusGeometry(K.fanR, 3, 10, 48), plainMat));
+const hub = new THREE.Mesh(new THREE.CylinderGeometry(9, 9, 10, 20), darkMat); hub.rotation.z = Math.PI / 2; fanRig.add(hub);
+const blades = new THREE.Group();
+for (let k = 0; k < 7; k++) {
+  const bl = new THREE.Mesh(new THREE.BoxGeometry(2, K.fanR - 12, 14), new THREE.MeshStandardMaterial({ color: 0xe3e7ea, metalness: 0.1, roughness: 0.6, transparent: true, opacity: 0.8, side: THREE.DoubleSide }));
+  const holder = new THREE.Group(); bl.position.y = (K.fanR - 12) / 2 + 9; bl.rotation.y = 0.5; holder.add(bl); holder.rotation.x = k / 7 * Math.PI * 2; blades.add(holder);
+}
+fanRig.add(blades);
+const stand = new THREE.Mesh(new THREE.BoxGeometry(8, 1, 8), plainMat); fanGroup.add(stand);
+const clip = new THREE.Mesh(new THREE.BoxGeometry(60, 14, 60), plainMat); scene.add(clip);
+scene.add(fanGroup);
+const JETLEN = 260;
+const jet = new THREE.Mesh(new THREE.CylinderGeometry(K.fanR + 0.11 * JETLEN, K.fanR, JETLEN, 32, 1, true), jetMat);
+jet.rotation.z = -Math.PI / 2; jet.position.set(JETLEN / 2, 0, 0); fanRig.add(jet);
+function placeFan() {
+  const fy = params.fanY;
+  fanGroup.position.set(K.fanX, fy, 0);
+  fanRig.rotation.z = -params.fanPitch * Math.PI / 180;
+  stand.scale.y = Math.max(1, fy - K.fanR - 7); stand.position.y = -(fy - K.fanR) / 2 - K.fanR + 4;
+  clip.position.set(K.fanX, 7, 0);
+  jet.visible = params.fanU > 0;
+}
+placeFan();
+function placeLid() {
+  const s = params.hinge === 'near' ? -1 : 1, a = backend.angle * Math.PI / 180;
+  lidGroup.position.set(s * K.Ro, K.rimY + 1.5, 0);
+  lidInner.position.set(-s * K.Rl, 0, 0);
+  lidGroup.rotation.z = -s * a;
+}
+// particles: one vec4 attribute (x, y, z, T), colour computed on the GPU
+const pointsMat = new THREE.RawShaderMaterial({
+  uniforms: { uTa: { value: 25 }, uSpan: { value: 70 }, uSize: { value: 4 }, cCold: { value: new THREE.Color(0x2a7ccf) }, cMid: { value: new THREE.Color(0xf59a3a) }, cHot: { value: new THREE.Color(0xdd4f1c) } },
+  vertexShader: 'precision highp float;\nuniform mat4 modelViewMatrix; uniform mat4 projectionMatrix;\nuniform float uTa, uSpan, uSize;\nattribute vec4 position;\nvarying float vT;\nvoid main(){ vT = clamp((position.w - uTa) / uSpan, 0.0, 1.0); vec4 mv = modelViewMatrix * vec4(position.xyz, 1.0); gl_Position = projectionMatrix * mv; gl_PointSize = uSize * (700.0 / -mv.z); }',
+  fragmentShader: 'precision highp float;\nuniform vec3 cCold, cMid, cHot;\nvarying float vT;\nvoid main(){ vec2 d = gl_PointCoord - 0.5; if (dot(d, d) > 0.25) discard; vec3 c = vT < 0.6 ? mix(cCold, cMid, vT / 0.6) : mix(cMid, cHot, (vT - 0.6) / 0.4); gl_FragColor = vec4(c, 0.85); }',
+  transparent: true, depthWrite: false,
+});
+let pGeo = null, points = null, displayN = 0;
+function buildPoints() {
+  if (points) { scene.remove(points); pGeo.dispose(); }
+  displayN = Math.min(backend.n, DISPLAY_MAX);
+  pGeo = new THREE.BufferGeometry();
+  pGeo.setAttribute('position', new THREE.BufferAttribute(backend.posT, 4).setUsage(THREE.DynamicDrawUsage));
+  pGeo.setDrawRange(0, displayN);
+  points = new THREE.Points(pGeo, pointsMat); points.frustumCulled = false; scene.add(points);
+  pointsMat.uniforms.uSize.value = backend.n > 50000 ? 2.6 : 4.2;
+}
+function updatePoints() { if (pGeo.attributes.position.array !== backend.posT) pGeo.setAttribute('position', new THREE.BufferAttribute(backend.posT, 4).setUsage(THREE.DynamicDrawUsage)); pGeo.attributes.position.needsUpdate = true; }
+window.applyTheme = function () {
+  scene.background = new THREE.Color(css.scene);
+  deskMat.color.set(css.wood); waterMat.color.set(css.water); jetMat.color.set(css.cold); ringMat.color.set(css.muted);
+  pointsMat.uniforms.cCold.value.set(css.cold); pointsMat.uniforms.cMid.value.set(css.hot2); pointsMat.uniforms.cHot.value.set(css.hot);
+};
+function fitRenderer() {
+  const w = Math.max(280, canvas.parentElement.clientWidth), h = Math.round(w * 0.72);
+  renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+fitRenderer();
+window.addEventListener('resize', () => { fitRenderer(); fitSpark(); });
+let drag = null, pinch = null;
+canvas.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, y: e.clientY, id: e.pointerId }; canvas.setPointerCapture(e.pointerId); });
+canvas.addEventListener('pointermove', (e) => {
+  if (!drag || e.pointerId !== drag.id) return;
+  orbit.theta -= (e.clientX - drag.x) * 0.006; orbit.phi -= (e.clientY - drag.y) * 0.006;
+  orbit.phi = Math.max(0.15, Math.min(1.5, orbit.phi)); drag.x = e.clientX; drag.y = e.clientY; placeCamera();
+});
+canvas.addEventListener('pointerup', (e) => { if (drag && e.pointerId === drag.id) drag = null; });
+canvas.addEventListener('pointercancel', () => { drag = null; });
+canvas.addEventListener('wheel', (e) => { e.preventDefault(); orbit.radius = Math.max(350, Math.min(1800, orbit.radius * (1 + e.deltaY * 0.0012))); placeCamera(); }, { passive: false });
+canvas.addEventListener('touchstart', (e) => { if (e.touches.length === 2) pinch = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY); }, { passive: true });
+canvas.addEventListener('touchmove', (e) => {
+  if (e.touches.length === 2 && pinch) { const d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY); orbit.radius = Math.max(350, Math.min(1800, orbit.radius * pinch / d)); pinch = d; placeCamera(); }
+}, { passive: true });
+canvas.addEventListener('touchend', () => { pinch = null; }, { passive: true });
+
+// ---------- sparkline + readouts ----------
+const spark = $('spark'), sctx = spark.getContext('2d');
+function fitSpark() { const r = spark.getBoundingClientRect(); const dpr = Math.min(window.devicePixelRatio || 1, 2); spark.width = Math.round(Math.max(100, r.width) * dpr); spark.height = Math.round(56 * dpr); sctx.setTransform(dpr, 0, 0, dpr, 0, 0); }
+fitSpark();
+function drawSpark(total) {
+  const w = spark.getBoundingClientRect().width, h = 56;
+  sctx.clearRect(0, 0, w, h);
+  const hist = backend.hist, mono = getComputedStyle(document.body).getPropertyValue('--font-mono');
+  if (hist.length < 2) { sctx.fillStyle = css.muted; sctx.font = '11px ' + mono; sctx.fillText('水温曲线', 0, 12); return; }
+  const Tw0 = backend.p.Tw0; let min = Tw0; for (const v of hist) if (v[1] < min) min = v[1];
+  const range = Math.max(0.5, Tw0 - min) * 1.1, len = Math.max(hist[hist.length - 1][0], total);
+  sctx.strokeStyle = css.line; sctx.lineWidth = 1; sctx.beginPath(); sctx.moveTo(0, h - 0.5); sctx.lineTo(w, h - 0.5); sctx.stroke();
+  if (scan) { sctx.fillStyle = css.line; sctx.globalAlpha = 0.5; sctx.fillRect(0, 0, scan.warm / len * w, h - 1); sctx.globalAlpha = 1; }
+  sctx.strokeStyle = css.hot; sctx.lineWidth = 1.5; sctx.beginPath();
+  for (let i = 0; i < hist.length; i++) { const x = hist[i][0] / len * w, y = 6 + (Tw0 - hist[i][1]) / range * (h - 12); if (i === 0) sctx.moveTo(x, y); else sctx.lineTo(x, y); }
+  sctx.stroke();
+  sctx.fillStyle = css.muted; sctx.font = '10px ' + mono; sctx.textAlign = 'right'; sctx.fillText('−' + (Tw0 - min).toFixed(2) + ' ℃', w - 2, h - 6); sctx.textAlign = 'left';
+}
+function pct(v, tot) { return tot > 0 ? Math.max(0, Math.round(100 * v / tot)) : 0; }
+function updateReadouts() {
+  const s = backend.summary();
+  $('roTw').innerHTML = s.Tw.toFixed(2) + '<small>℃</small>';
+  $('roDT').innerHTML = s.dT.toFixed(2) + '<small>℃</small>';
+  $('roT').textContent = s.steps;
+  $('roRate').innerHTML = (s.steps >= 200 ? (s.dT / s.steps * 1000).toFixed(2) : '–') + '<small>℃</small>';
+  const tot = Math.max(0, s.lid) + Math.max(0, s.spout) + Math.max(0, s.wallOut);
+  const pl = pct(s.lid, tot), ps = pct(s.spout, tot), pw = pct(s.wallOut, tot);
+  $('bLid').style.width = pl + '%'; $('pLid').textContent = tot > 0 ? pl + '%' : '–';
+  $('bSpout').style.width = ps + '%'; $('pSpout').textContent = tot > 0 ? ps + '%' : '–';
+  $('bWall').style.width = pw + '%'; $('pWall').textContent = tot > 0 ? pw + '%' : '–';
+  $('ovAngle').textContent = backend.angle + '°';
+  $('ovFan').textContent = fanLabel();
+  $('ovBackend').textContent = `${backendName} · ${(backend.n / 1000).toFixed(0)} k 微团 · 网格 ${backend.cs}（${(backend.cells / 1000).toFixed(0)} k 格）`;
+}
+function setStatus(t) { if (t !== lastStatus) { $('status').textContent = t; lastStatus = t; } }
+function fanLabel() { return params.fanU > 0 ? '风扇 ' + params.fanU.toFixed(1) + (params.fanPitch > 0 ? ' ↘' + params.fanPitch + '°' : '') : '风扇 关'; }
+function fanSpeedText(v) { if (v <= 0) return '关'; const dt = Math.min(1, 4 / v); return v.toFixed(1) + '（≈ 热羽流的 ' + (v / 3).toFixed(1) + ' 倍' + (dt < 1 ? '，步长 ×' + dt.toFixed(2) + '，扫描时间 ×' + (1 / dt).toFixed(1) : '') + '）'; }
+// where the jet axis crosses the plane of the rim, relative to the opening centre (in units)
+function aimOffset() { const p = params.fanPitch * Math.PI / 180; if (p <= 0.001) return null; return K.fanX + (params.fanY - K.rimY) / Math.tan(p); }
+function updateAimText() {
+  const o = aimOffset(); let t;
+  if (params.fanPitch === 0) t = '水平吹';
+  else if (params.fanY <= K.rimY) t = '向下 ' + params.fanPitch + '°（风扇不高于壶口，射流打在壶身上）';
+  else { const cm = o * 0.085; t = '向下 ' + params.fanPitch + '°，轴线过壶口平面时' + (Math.abs(cm) < 1.5 ? '正中壶口' : (cm < 0 ? '离壶口中心近侧 ' : '越过壶口中心 ') + Math.abs(cm).toFixed(0) + ' cm'); }
+  $('fanPitchVal').textContent = t;
+}
+function fmtTime(s) { return s < 90 ? Math.max(1, Math.round(s)) + ' 秒' : (s / 60).toFixed(1) + ' 分钟'; }
+
+// ---------- loop ----------
+// changes to the simulation wait until no GPU batch / readback is in flight
+const actions = [];
+function queueAction(fn) { if (!busy) fn(); else actions.push(fn); }
+function batchSize(ms) { return Math.max(1, Math.min(300, Math.round(ms / Math.max(0.05, msPerStep)))); }
+function frame() {
+  if (!busy) { while (actions.length) actions.shift()(); }
+  if (backend && !busy && (scan || playing)) {
+    let k;
+    if (scan) {
+      const target = backend.t < scan.warm ? scan.warm : scan.steps;
+      k = Math.min(batchSize(mode === 'gpu' ? 40 : 26), target - backend.t);
+    } else k = liveMode > 0 ? liveMode : batchSize(mode === 'gpu' ? 40 : 24);
+    if (k > 0) {
+      busy = true; const t0 = performance.now(), tBefore = backend.t;
+      backend.run(k, displayN, mode === 'gpu' ? 1e9 : 26).then(() => {
+        const did = backend.t - tBefore; if (did > 0) msPerStep = msPerStep * 0.8 + ((performance.now() - t0) / did) * 0.2;
+        busy = false; if (scan) scanAfterBatch();
+      }).catch((err) => { busy = false; gpuFailed(err); });
+    }
+  }
+  if (params.fanU > 0) blades.rotation.x += 0.05 * params.fanU;
+  if (backend) { updatePoints(); renderer.render(scene, camera); drawSpark(scan ? scan.steps : 1500); updateReadouts(); }
+  requestAnimationFrame(frame);
+}
+
+// ---------- scan ----------
+function preset() { return PRESETS[mode][quality]; }
+function startScan() {
+  const q = preset(), angles = SCAN_SETS[q.set];
+  applyPreset(q);
+  const dt = Math.min(1, 4 / Math.max(params.fanU, 1e-9));           // the cores shrink the time-step beyond fan speed 4
+  const steps = Math.round(q.steps / dt), warm = Math.round(steps / 3);
+  scan = { i: 0, si: 0, acc: null, angles, steps, warm, dt, TwWarm: null, t0: performance.now() };
+  results = [];
+  backend.reset(SEEDS[0]); backend.setAngle(angles[0]); placeLid();
+  $('btnScan').disabled = true; $('angle').disabled = true; $('quality').disabled = true; $('hinge').disabled = true;
+  $('angle').value = angles[0]; $('angleVal').textContent = angles[0] + '°';
+  renderResults(false);
+}
+function applyPreset(q) { if (backend.n !== q.n || backend.cs !== q.cs) { backend.setParams({ n: q.n, cs: q.cs }); buildPoints(); } }
+function scanAfterBatch() {
+  const a = scan.angles[scan.i], runs = scan.angles.length * seedCount, total = runs * scan.steps;
+  const done = (scan.i * seedCount + scan.si) * scan.steps + backend.t;
+  $('prog').style.width = (100 * done / total) + '%';
+  setStatus(`扫描 ${a}°（${scan.i + 1}/${scan.angles.length}）` + (seedCount > 1 ? `  种子 ${scan.si + 1}/${seedCount}` : '') + `  步 ${backend.t}/${scan.steps}  剩余约 ${fmtTime((total - done) * msPerStep / 1000 * 1.1)}`);
+  if (backend.t === scan.warm && scan.TwWarm === null) scan.TwWarm = backend.Tw;
+  if (backend.t < scan.steps) return;
+  const s = backend.summary();
+  const r = { angle: a, dT: (scan.TwWarm === null ? backend.p.Tw0 : scan.TwWarm) - backend.Tw, dTall: s.dT, lid: s.lid, spout: s.spout, wallOut: s.wallOut };
+  if (!scan.acc) scan.acc = { angle: a, dT: 0, dTall: 0, lid: 0, spout: 0, wallOut: 0, runs: [] };
+  for (const k of ['dT', 'dTall', 'lid', 'spout', 'wallOut']) scan.acc[k] += r[k] / seedCount;
+  scan.acc.runs.push(r.dT);
+  scan.TwWarm = null; scan.si++;
+  if (scan.si < seedCount) { backend.reset(SEEDS[scan.si]); backend.setAngle(a); placeLid(); return; }
+  results.push(scan.acc); scan.acc = null; scan.si = 0; scan.i++;
+  renderResults(scan.i >= scan.angles.length);
+  if (scan.i >= scan.angles.length) {
+    const best = bestOf(results), used = (performance.now() - scan.t0) / 1000;
+    scan = null;
+    $('prog').style.width = '100%';
+    $('btnScan').disabled = false; $('angle').disabled = false; $('quality').disabled = false; $('hinge').disabled = false;
+    $('angle').value = best.angle; $('angleVal').textContent = best.angle + '°';
+    const knee = kneeOf(results);
+    backend.reset(SEED); backend.setAngle(best.angle); placeLid(); playing = true; $('btnPlay').textContent = '暂停';
+    setStatus(`扫描完成（用时 ${fmtTime(used)}）：${knee}° 起进入最快区间，样本最高点 ${best.angle}°。现在以 ${best.angle}° 继续演示。`);
+    return;
+  }
+  backend.reset(SEEDS[0]); backend.setAngle(scan.angles[scan.i]); placeLid();
+  $('angle').value = scan.angles[scan.i]; $('angleVal').textContent = scan.angles[scan.i] + '°';
+}
+function bestOf(res) { return res.reduce((b, r) => (r.dT > b.dT ? r : b), res[0]); }
+const PLATEAU = 0.03;
+function kneeOf(res) { const best = bestOf(res); return res.find((r) => r.dT >= best.dT * (1 - PLATEAU)).angle; }
+
+// ---------- results chart + table ----------
+const NS = 'http://www.w3.org/2000/svg';
+function el(tag, attrs, text) { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text !== undefined) e.textContent = text; return e; }
+function renderResults(final) {
+  const svg = $('chart'); while (svg.firstChild) svg.removeChild(svg.firstChild);
+  const Wc = 560, Hc = 300, mL = 48, mR = 16, mT = 22, mB = 40;
+  const x = (deg) => mL + (deg / 150) * (Wc - mL - mR);
+  const vals = results.map((r) => r.dT);
+  const ymax = Math.max(0.5, ...vals) * 1.15;
+  const y = (v) => Hc - mB - (v / ymax) * (Hc - mT - mB);
+  for (let i = 0; i <= 4; i++) { const v = ymax * i / 4, yy = y(v); svg.appendChild(el('line', { x1: mL, x2: Wc - mR, y1: yy, y2: yy, class: i === 0 ? 'axis' : 'grid' })); svg.appendChild(el('text', { x: mL - 8, y: yy + 4, 'text-anchor': 'end' }, v.toFixed(1))); }
+  const q = preset();
+  const angles = scan ? scan.angles : (results.length ? results.map((r) => r.angle) : SCAN_SETS[q.set]);
+  for (const d of angles) svg.appendChild(el('text', { x: x(d), y: Hc - mB + 16, 'text-anchor': 'middle' }, d + '°'));
+  const steps = scan ? scan.steps : Math.round(q.steps / Math.min(1, 4 / Math.max(params.fanU, 1e-9))), win = steps - Math.round(steps / 3);
+  const fanTxt = fanLabel(), hingeTxt = (params.hinge === 'near' ? '背向风扇掀开' : '朝风扇掀开') + (params.bounce ? (params.bounce === 2 ? ' · 贴壁滑移(半摩擦)' : ' · 贴壁滑移') : ' · 镜面反弹');
+  svg.appendChild(el('text', { x: mL, y: 12, class: 'ttl' }, `预热后 ${win} 步的降温量 ΔT（℃）· ${fanTxt} · ${hingeTxt} · ${backendName}`));
+  svg.appendChild(el('text', { x: Wc - mR, y: Hc - 6, 'text-anchor': 'end' }, '壶盖开度'));
+  if (!results.length) { svg.appendChild(el('text', { x: Wc / 2, y: Hc / 2, 'text-anchor': 'middle', class: 'ttl' }, scan ? '扫描中…' : '尚未扫描')); return; }
+  const best = bestOf(results);
+  if (final) {
+    const thr = best.dT * 0.97, plateau = results.filter((r) => r.dT >= thr).map((r) => r.angle);
+    const pMin = Math.min(...plateau), pMax = Math.max(...plateau);
+    svg.appendChild(el('rect', { x: x(pMin) - 8, y: mT, width: x(pMax) - x(pMin) + 16, height: Hc - mT - mB, class: 'plateau' }));
+    svg.appendChild(el('text', { x: x(pMin) - 4, y: mT + 12 }, '与最快相差 <3%'));
+    const base = results[0].dT;
+    svg.appendChild(el('line', { x1: mL, x2: Wc - mR, y1: y(base), y2: y(base), class: 'base' }));
+    svg.appendChild(el('text', { x: Wc - mR - 4, y: y(base) - 5, 'text-anchor': 'end' }, `闭盖 ${base.toFixed(2)}`));
+  }
+  svg.appendChild(el('path', { d: results.map((r, i) => (i ? 'L' : 'M') + x(r.angle).toFixed(1) + ' ' + y(r.dT).toFixed(1)).join(' '), class: 'curve' }));
+  for (const r of results) {
+    const isBest = final && r === best;
+    svg.appendChild(el('circle', { cx: x(r.angle), cy: y(r.dT), r: isBest ? 6 : 4, class: 'pt' + (isBest ? ' best' : '') }));
+    if (isBest) svg.appendChild(el('text', { x: x(r.angle), y: y(r.dT) - 12, 'text-anchor': 'middle', class: 'lbl' }, `${r.angle}°  ${r.dT.toFixed(2)} ℃`));
+  }
+  if (!final) return;
+  const v = $('verdict'), base = results[0].dT, thr = best.dT * (1 - PLATEAU);
+  const plateau = results.filter((r) => r.dT >= thr).map((r) => r.angle);
+  const knee = plateau[0], pMax = plateau[plateau.length - 1];
+  const gain = base > 0 ? ((best.dT / base - 1) * 100).toFixed(0) : '–';
+  const half = results.find((r) => r.dT >= base + (best.dT - base) * 0.5);
+  const opened = results.slice(1);
+  const spread = ((best.dT - Math.min(...opened.map((r) => r.dT))) / best.dT * 100).toFixed(0);
+  const trend = opened.length >= 3 ? (opened[opened.length - 1].dT - opened[Math.floor(opened.length / 2)].dT) / best.dT : 0;
+  let shape;
+  if (plateau.length === results.length - 1 || +spread <= 5) shape = `只要打开，所有开度之间总共只差 ${spread}%，开度大小基本不重要`;
+  else if (trend > PLATEAU) shape = `降温量随开度一路上升，盖子越是让开壶口上方越好`;
+  else if (pMax < results[results.length - 1].angle) shape = `${pMax}° 之后又慢慢变差，盖子向后仰过头开始遮住来风`;
+  else shape = `从 ${knee}° 起进入平台，再开大收益不到 3%`;
+  v.innerHTML = `<div class="big">${knee === pMax ? knee + '°' : knee + '–' + pMax + '°'}<small> 最快区间</small></div>` +
+    `<p>区间内各开度的降温量都在最高值的 3% 以内（样本最高点 ${best.angle}°：预热后 ${win} 步降 <b>${best.dT.toFixed(2)} ℃</b>，比闭盖的 ${base.toFixed(2)} ℃ 快 <b>${gain}%</b>）。${shape}。` +
+    (half ? `开到 ${half.angle}° 就已拿到开盖增益的一半以上。` : '') + `</p>` +
+    `<p class="empty">本轮：${backendName}，${(backend.n / 1000).toFixed(0)} k 微团，网格 ${backend.cs}，${seedCount} 组随机数。` +
+    (seedCount === 1 ? `单组随机数下相邻开度百分之几的差别属于扰动量级，所以这里报区间而不是单一角度；把「随机种子数」调到 3 可以把曲线磨平。` : `各开度随机扰动的幅度见表中「±」列。`) + `</p>`;
+  const tb = $('tbl'); tb.hidden = false; const body = tb.tBodies[0]; body.innerHTML = '';
+  for (const r of results) {
+    const tot = Math.max(0, r.lid) + Math.max(0, r.spout) + Math.max(0, r.wallOut);
+    const tr = document.createElement('tr'); if (r.dT >= thr) tr.className = 'best';
+    const rel = base > 0 ? ((r.dT / base - 1) * 100) : 0;
+    const pm = r.runs && r.runs.length > 1 ? ((Math.max(...r.runs) - Math.min(...r.runs)) / 2).toFixed(2) : '–';
+    tr.innerHTML = `<td>${r.angle}°</td><td>${r.dT.toFixed(2)}</td><td>${pm}</td><td>${rel >= 0 ? '+' : ''}${rel.toFixed(0)}%</td><td>${pct(r.lid, tot)}%</td><td>${pct(r.spout, tot)}%</td><td>${pct(r.wallOut, tot)}%</td>`;
+    body.appendChild(tr);
+  }
+}
+
+// ---------- controls ----------
+function fillQuality() {
+  const sel = $('quality'); sel.innerHTML = '';
+  for (const k of ['fast', 'standard', 'fine']) { const o = document.createElement('option'); o.value = k; o.textContent = PRESETS[mode][k].label; if (k === quality) o.selected = true; sel.appendChild(o); }
+}
+$('angle').addEventListener('input', (e) => { const a = +e.target.value; $('angleVal').textContent = a + '°'; if (!scan && backend) queueAction(() => { backend.setAngle(a); placeLid(); }); });
+$('btnPlay').addEventListener('click', () => { playing = !playing; $('btnPlay').textContent = playing ? '暂停' : '运行'; });
+$('btnReset').addEventListener('click', () => { if (scan || !backend) return; queueAction(() => { backend.reset(SEED); backend.setAngle(+$('angle').value); placeLid(); setStatus('已重置'); }); });
+$('speed').addEventListener('change', (e) => { liveMode = +e.target.value; });
+$('quality').addEventListener('change', (e) => { quality = e.target.value; if (!scan && backend) queueAction(() => { applyPreset(preset()); backend.setAngle(+$('angle').value); placeLid(); renderResults(false); }); });
+$('btnScan').addEventListener('click', () => { if (!scan && backend) { $('btnScan').disabled = true; queueAction(startScan); } });
+$('fanU').addEventListener('input', (e) => { const v = +e.target.value; $('fanUVal').textContent = fanSpeedText(v); if (scan || !backend) { e.target.value = params.fanU; $('fanUVal').textContent = fanSpeedText(params.fanU); return; } params.fanU = v; queueAction(() => { backend.setParams({ fanU: v }); placeFan(); renderResults(false); }); });
+$('fanY').addEventListener('input', (e) => {
+  const v = +e.target.value, cm = (v - K.rimY) * 0.085;
+  $('fanYVal').textContent = Math.abs(cm) < 0.5 ? '与壶口齐平' : (cm > 0 ? '高于壶口 ' : '低于壶口 ') + Math.abs(cm).toFixed(1) + ' cm';
+  if (scan || !backend) return; params.fanY = v; updateAimText(); queueAction(() => { backend.setParams({ fanY: v }); placeFan(); });
+});
+$('fanPitch').addEventListener('input', (e) => {
+  const v = +e.target.value;
+  if (scan || !backend) { e.target.value = params.fanPitch; return; }
+  params.fanPitch = v; updateAimText(); queueAction(() => { backend.setParams({ fanPitch: v }); placeFan(); });
+});
+$('btnAim').addEventListener('click', () => {
+  if (scan || !backend) return;
+  if (params.fanY <= K.rimY + 5) { params.fanY = 360; $('fanY').value = 360; $('fanYVal').textContent = '高于壶口 ' + ((360 - K.rimY) * 0.085).toFixed(1) + ' cm'; }
+  const pitch = Math.round(Math.atan2(params.fanY - K.rimY, -K.fanX) * 180 / Math.PI);
+  params.fanPitch = pitch; $('fanPitch').value = pitch; updateAimText();
+  queueAction(() => { backend.setParams({ fanY: params.fanY, fanPitch: pitch }); placeFan(); });
+});
+$('bounce').addEventListener('change', (e) => { if (scan || !backend) { e.target.value = params.bounce; return; } params.bounce = +e.target.value; queueAction(() => backend.setParams({ bounce: params.bounce })); });
+$('hinge').addEventListener('change', (e) => { if (scan || !backend) { e.target.value = params.hinge; return; } params.hinge = e.target.value; queueAction(() => { backend.setParams({ hinge: params.hinge }); backend.setAngle(+$('angle').value); placeLid(); }); });
+function bindParam(id, key, fmt) {
+  const inp = $(id), out = $(id + 'v');
+  inp.addEventListener('input', () => { const val = +inp.value; out.textContent = fmt(val); if (scan || !backend) return; params[key] = val; queueAction(() => backend.setParams({ [key]: val })); });
+}
+bindParam('pAlpha', 'alphaWall', (v) => v.toFixed(2));
+bindParam('pLat', 'latent', (v) => v.toFixed(1));
+bindParam('pBuoy', 'buoy', (v) => v.toFixed(2));
+bindParam('pNoise', 'noise', (v) => v.toFixed(2));
+bindParam('pKp', 'kp', (v) => v.toFixed(1));
+bindParam('pCw', 'Cw', (v) => v);
+$('pSeeds').addEventListener('input', (e) => { seedCount = +e.target.value; $('pSeedsv').textContent = seedCount; });
+
+// ---------- backend start-up ----------
+function gpuFailed(err) {
+  console.error(err);
+  if (mode !== 'gpu') { setStatus('出错：' + (err && err.message ? err.message : err)); return; }
+  mode = 'cpu'; backendName = 'CPU（WebGPU 出错后回退）'; scan = null;
+  setStatus('WebGPU 出错，已回退到 CPU：' + (err && err.message ? err.message : err));
+  const q = PRESETS.cpu[quality];
+  backend = new CpuBackend(Object.assign({ n: q.n, cs: q.cs }, params));
+  backend.setAngle(+$('angle').value); buildPoints(); placeLid(); fillQuality(); renderResults(false);
+  $('btnScan').disabled = false; $('angle').disabled = false; $('quality').disabled = false; $('hinge').disabled = false;
+}
+async function startBackend() {
+  setStatus('正在启动 WebGPU…');
+  if (navigator.gpu) {
+    try {
+      const q = PRESETS.gpu[quality];
+      backend = await GpuSim3D.create(Object.assign({ n: q.n, cs: q.cs }, params));
+      mode = 'gpu'; backendName = 'WebGPU · ' + backend.name;
+      setStatus('WebGPU 已就绪：' + backend.name);
+    } catch (err) {
+      console.warn('WebGPU unavailable', err);
+      setStatus('WebGPU 不可用（' + (err && err.message ? err.message : err) + '），使用 CPU');
+    }
+  } else setStatus('此浏览器没有 WebGPU，使用 CPU');
+  if (!backend) {
+    mode = 'cpu'; backendName = 'CPU';
+    const q = PRESETS.cpu[quality];
+    backend = new CpuBackend(Object.assign({ n: q.n, cs: q.cs }, params));
+  }
+  backend.setAngle(+$('angle').value);
+  buildPoints(); placeLid(); fillQuality(); renderResults(false);
+  requestAnimationFrame(frame);
+}
+startBackend();
+})();
+
+</script>
+
+</body></html>
