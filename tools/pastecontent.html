@@ -6,6 +6,7 @@
     <title>Paste → Print (Image-safe)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"></script>
     <style>
         :root {
             --w: 210mm;
@@ -55,10 +56,11 @@
 
 <body>
     <div class="box">
-        <h1>Paste clipboard HTML → replace page</h1>
+        <h1>Paste clipboard HTML / Markdown → replace page</h1>
         <p>Reads <code>text/html</code> from the clipboard, fixes image URLs, and rewrites the page for printing/saving.
+            If the clipboard holds Markdown text, it is rendered as Markdown.
         </p>
-        <button id="paste">📋 Paste HTML</button>
+        <button id="paste">📋 Paste</button>
         <div id="msg" role="status" aria-live="polite" style="margin-top:10px"></div>
         <details style="margin-top:10px">
             <summary>Troubleshooting</summary>
@@ -76,9 +78,9 @@
         document.getElementById('paste').addEventListener('click', async () => {
             msg.textContent = 'Reading clipboard…';
             try {
-                const { html, sourceUrl } = await readClipboardHTMLWithSource();
+                const { html, sourceUrl, isMarkdown } = await readClipboardHTMLWithSource();
                 if (!html) {
-                    msg.innerHTML = '<span class="err">Clipboard had no HTML (plain text fallback skipped).</span>';
+                    msg.innerHTML = '<span class="err">Clipboard had no HTML or text.</span>';
                     return;
                 }
 
@@ -86,7 +88,8 @@
                 const sanitized = DOMPurify.sanitize(html, {
                     ALLOWED_ATTR: [
                         'style', 'class', 'id', 'href', 'src', 'srcset', 'sizes', 'alt', 'title',
-                        'width', 'height', 'colspan', 'rowspan', 'cellspacing', 'cellpadding', 'align', 'target', 'rel'
+                        'width', 'height', 'colspan', 'rowspan', 'cellspacing', 'cellpadding', 'align', 'target', 'rel',
+                        'start', 'type', 'checked', 'disabled'
                     ],
                     ADD_TAGS: ['style'],
                     ADD_DATA_URI_TAGS: ['img', 'source', 'video', 'audio'],
@@ -94,7 +97,7 @@
                 });
 
                 // Build a document shell and inject content
-                const shell = makeShell(sanitized, sourceUrl);
+                const shell = makeShell(sanitized, sourceUrl, isMarkdown);
                 document.open(); document.write(shell); document.close();
 
             } catch (e) {
@@ -111,7 +114,8 @@
                     if (it.types.includes('text/html')) {
                         const blob = await it.getType('text/html');
                         html = await blob.text();
-                    } else if (it.types.includes('text/plain')) {
+                    }
+                    if (it.types.includes('text/plain')) {
                         const blob = await it.getType('text/plain');
                         plain = await blob.text();
                     }
@@ -127,9 +131,44 @@
                 sourceUrl = parsed.sourceUrl || '';
             }
 
+            // Markdown: plain text that looks like Markdown, and the HTML (if any) is only a
+            // code-editor view of it (e.g. VS Code copies colored <div>/<span> with no structure)
+            if (plain && looksLikeMarkdown(plain) && !hasRichStructure(html)) {
+                return { html: marked.parse(plain, { gfm: true }), sourceUrl: '', isMarkdown: true };
+            }
+
             // Plain-text fallback (only if no HTML)
             if (!html && plain) html = `<pre style="white-space:pre-wrap;margin:0">${escapeHTML(plain)}</pre>`;
-            return { html, sourceUrl };
+            return { html, sourceUrl, isMarkdown: false };
+        }
+
+        function looksLikeMarkdown(s) {
+            // Strong signals count 2, weak signals count 1; 2 or more means Markdown
+            const strong = [
+                /^#{1,6}\s+\S/m,                                    // # heading
+                /^\s*(```|~~~)/m,                                   // fenced code
+                /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?\s*$/m,     // table separator row
+                /!?\[[^\]\n]+\]\([^)\s]+(\s+"[^"]*")?\)/,           // [link](url) / ![img](url)
+            ];
+            const weak = [
+                /^\s*([-*+]|\d+[.)])\s+\S/m,                        // list item
+                /^>\s?\S/m,                                         // blockquote
+                /(\*\*|__)[^\s*_][^\n]*?\1/,                        // **bold**
+                /`[^`\n]+`/,                                        // `code`
+                /^\s*([-*_])(\s*\1){2,}\s*$/m,                      // --- rule
+                /^\s*[-*+]\s+\[[ xX]\]\s/m,                         // - [ ] task
+            ];
+            let score = 0;
+            for (const re of strong) if (re.test(s)) score += 2;
+            for (const re of weak) if (re.test(s)) score += 1;
+            return score >= 2;
+        }
+
+        function hasRichStructure(html) {
+            if (!html) return false;
+            const tmp = document.implementation.createHTMLDocument('');
+            tmp.body.innerHTML = html;
+            return !!tmp.body.querySelector('h1,h2,h3,h4,h5,h6,p,ul,ol,table,blockquote,img,a[href]');
         }
 
         function parseCFHTML(s) {
@@ -143,7 +182,7 @@
             return { fragment, sourceUrl: srcMatch ? srcMatch[1].trim() : '' };
         }
 
-        function makeShell(contentHTML, sourceUrl) {
+        function makeShell(contentHTML, sourceUrl, isMarkdown) {
             // Build a temp DOM to fix relative <img> src if we have a base
             let fixedHTML = contentHTML;
             if (sourceUrl) {
@@ -172,6 +211,23 @@ main#print{width:var(--w);margin:0 auto;padding:var(--pad)}
 img,svg,video,canvas{max-width:100%;height:auto}
 table{border-collapse:collapse}
 a{color:inherit;text-decoration:underline}
+.md h1,.md h2{border-bottom:1px solid #e5e7eb;padding-bottom:.3em}
+.md h1,.md h2,.md h3,.md h4{line-height:1.3;margin:1.2em 0 .6em}
+.md>:first-child{margin-top:0}
+.md p,.md ul,.md ol,.md blockquote,.md pre,.md table{margin:0 0 1em}
+.md ul,.md ol{padding-left:2em}
+.md li>ul,.md li>ol{margin:0}
+.md li:has(>input[type=checkbox]){list-style:none}
+.md li>input[type=checkbox]{margin:0 .4em 0 -1.4em}
+.md blockquote{border-left:4px solid #d1d5db;color:#555;padding:0 1em;margin-left:0}
+.md code{font:.9em/1.5 ui-monospace,Consolas,monospace;background:#f3f4f6;border-radius:4px;padding:.15em .35em}
+.md pre{background:#f6f8fa;border:1px solid #e5e7eb;border-radius:6px;padding:12px;white-space:pre-wrap;word-break:break-word}
+.md pre code{background:none;padding:0;font-size:.85em}
+.md table{border-collapse:collapse;display:block;max-width:100%;overflow:auto}
+.md th,.md td{border:1px solid #d1d5db;padding:6px 12px}
+.md th{background:#f6f8fa}
+.md hr{border:0;border-top:1px solid #e5e7eb;margin:1.5em 0}
+@media print{.md pre,.md table,.md blockquote,.md img{break-inside:avoid}.md h1,.md h2,.md h3,.md h4{break-after:avoid}}
       `.trim();
 
             return `
@@ -190,7 +246,7 @@ a{color:inherit;text-decoration:underline}
     <button onclick="history.length?history.back():location.reload()">Back</button>
     <span class="hint">Tip: Ctrl/Cmd+S to save</span>
   </div>
-  <main id="print">
+  <main id="print"${isMarkdown ? ' class="md"' : ''}>
     ${fixedHTML}
   </main>
 </body>
